@@ -8,12 +8,23 @@ Freeway fetches free models from OpenRouter, performs periodic health checks, an
 
 ## Features
 
+- **API Key Authentication**: All endpoints require `X-Api-Key` header
 - **Automatic Model Discovery**: Fetches all free models (`:free` suffix) from OpenRouter API
 - **Health Monitoring**: Periodic health checks with configurable intervals
 - **Smart Rate Limiting**: Handles 429 errors with automatic retry after 60 seconds
 - **Weighted Scoring**: Ranks models by availability, speed, and context length
 - **External Reporting**: Other projects can report failing models via API
 - **Docker Ready**: Includes Dockerfile and docker-compose with Traefik integration
+
+## Authentication
+
+All API endpoints require authentication via the `X-Api-Key` header.
+
+```bash
+curl -H "X-Api-Key: your-api-key" http://localhost:8000/model
+```
+
+Without a valid API key, requests return `401 Unauthorized`.
 
 ## Scoring Algorithm
 
@@ -101,6 +112,7 @@ Environment variables (see `.env.example`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `API_KEY` | (required) | API key for accessing Freeway endpoints |
 | `OPENROUTER_API_KEY` | (required for health checks) | Your OpenRouter API key |
 | `HEALTH_CHECK_ENABLED` | `true` | Enable/disable health checks |
 | `CHECK_INTERVAL_SECONDS` | `86400` | Interval between health check cycles (24h) |
@@ -125,7 +137,7 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env and add your OPENROUTER_API_KEY
+# Edit .env and set API_KEY and OPENROUTER_API_KEY
 
 # Run
 uvicorn app.main:app --reload
@@ -147,6 +159,7 @@ docker compose logs -f freeway
 freeway/
 ├── app/
 │   ├── api/
+│   │   ├── auth.py             # API key authentication
 │   │   └── routes.py           # API endpoints
 │   ├── models/
 │   │   ├── health_check.py     # Health check data models
@@ -175,7 +188,12 @@ From another project, get the best free model:
 ```python
 import httpx
 
-response = httpx.get("http://localhost:8000/model")
+FREEWAY_URL = "http://localhost:8000"
+FREEWAY_API_KEY = "your-freeway-api-key"
+
+headers = {"X-Api-Key": FREEWAY_API_KEY}
+
+response = httpx.get(f"{FREEWAY_URL}/model", headers=headers)
 best_model = response.json()
 
 # Use the model ID with OpenRouter
@@ -187,9 +205,11 @@ Report a failing model:
 ```python
 import httpx
 
-httpx.post("http://localhost:8000/report", json={
-    "model_id": "failing-model/name:free"
-})
+httpx.post(
+    f"{FREEWAY_URL}/report",
+    headers={"X-Api-Key": FREEWAY_API_KEY},
+    json={"model_id": "failing-model/name:free"}
+)
 ```
 
 ## Deployment

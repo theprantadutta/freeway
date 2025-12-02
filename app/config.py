@@ -6,6 +6,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
+    # Freeway API Authentication
+    API_KEY: str  # Required - API key for accessing Freeway endpoints
+
     # OpenRouter API
     OPENROUTER_API_KEY: str = ""  # Optional - only needed for health checks
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"

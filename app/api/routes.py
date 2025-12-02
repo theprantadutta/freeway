@@ -2,8 +2,9 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.api.auth import require_api_key
 from app.config import settings
 from app.models.health_check import HealthStatus
 from app.schemas.responses import (
@@ -23,7 +24,7 @@ router = APIRouter()
 
 
 @router.get("/model", response_model=ModelResponse)
-async def get_best_model():
+async def get_best_model(_: str = Depends(require_api_key)):
     """
     Get the best available free model based on weighted scoring.
 
@@ -58,7 +59,7 @@ async def get_best_model():
 
 
 @router.get("/models", response_model=ModelListResponse)
-async def get_all_models():
+async def get_all_models(_: str = Depends(require_api_key)):
     """
     Get all monitored free models ranked by composite score.
 
@@ -96,7 +97,7 @@ async def get_all_models():
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check():
+async def health_check(_: str = Depends(require_api_key)):
     """
     Service health check endpoint.
     Returns service status and monitoring statistics.
@@ -112,7 +113,7 @@ async def health_check():
 
 
 @router.post("/report", response_model=ReportResponse)
-async def report_failing_model(request: ReportRequest):
+async def report_failing_model(request: ReportRequest, _: str = Depends(require_api_key)):
     """
     Report a failing model from external projects.
 
