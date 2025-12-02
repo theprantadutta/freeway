@@ -3,8 +3,9 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
+from app.api.auth import require_api_key
 from app.api.routes import router
 from app.config import settings
 from app.scheduler import start_scheduler, stop_scheduler
@@ -82,8 +83,9 @@ app = FastAPI(
     description="Monitor and rank OpenRouter free models by availability and speed",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=None,  # Disable public docs
+    redoc_url=None,  # Disable public redoc
+    openapi_url=None,  # Disable public OpenAPI schema
 )
 
 # Include API routes
@@ -91,7 +93,7 @@ app.include_router(router)
 
 
 @app.get("/")
-async def root():
+async def root(_: str = Depends(require_api_key)):
     """Root endpoint with service information."""
     return {
         "service": "freeway",
@@ -101,7 +103,7 @@ async def root():
             "best_model": "/model",
             "all_models": "/models",
             "health": "/health",
-            "docs": "/docs",
+            "report": "/report",
         },
     }
 

@@ -26,6 +26,8 @@ curl -H "X-Api-Key: your-api-key" http://localhost:8000/model
 
 Without a valid API key, requests return `401 Unauthorized`.
 
+**Note**: Swagger/OpenAPI docs are disabled in production for security.
+
 ## Scoring Algorithm
 
 Models are ranked using a weighted scoring system (0-100 points):
