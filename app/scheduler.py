@@ -1,9 +1,9 @@
-"""Background scheduler for periodic health checks using APScheduler."""
+"""Background scheduler for daily health checks using APScheduler."""
 
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
 from app.services.health_check_service import health_check_service
@@ -28,23 +28,19 @@ async def run_health_checks():
 
 
 def start_scheduler():
-    """Start the background scheduler."""
-    from datetime import datetime, timedelta, timezone
-
+    """Start the background scheduler with daily cron job."""
     try:
-        # Add the health check job - run immediately, then every CHECK_INTERVAL_SECONDS
+        # Add the health check job - runs daily at configured hour (UTC)
         scheduler.add_job(
             run_health_checks,
-            trigger=IntervalTrigger(seconds=settings.CHECK_INTERVAL_SECONDS),
+            trigger=CronTrigger(hour=settings.HEALTH_CHECK_HOUR, timezone="UTC"),
             id="health_check_job",
-            name="Model Health Checks",
+            name="Daily Model Health Checks",
             replace_existing=True,
-            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=5),  # Start in 5 seconds
         )
 
         scheduler.start()
-        hours = settings.CHECK_INTERVAL_SECONDS / 3600
-        logger.info(f"Scheduler started - first run in 5s, then every {hours:.1f} hours")
+        logger.info(f"Scheduler started - health checks daily at {settings.HEALTH_CHECK_HOUR:02d}:00 UTC")
 
     except Exception as e:
         logger.error(f"Failed to start scheduler: {e}")

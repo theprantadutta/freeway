@@ -10,8 +10,8 @@ Freeway fetches free models from OpenRouter, performs periodic health checks, an
 
 - **API Key Authentication**: All endpoints require `X-Api-Key` header
 - **Automatic Model Discovery**: Fetches all free models (`:free` suffix) from OpenRouter API
-- **Health Monitoring**: Periodic health checks with configurable intervals
-- **Smart Rate Limiting**: Handles 429 errors with automatic retry after 60 seconds
+- **Health Monitoring**: Daily health checks at configurable time (default midnight UTC)
+- **Smart Rate Limiting**: Handles 429 errors with exponential backoff (up to 3 retries)
 - **Weighted Scoring**: Ranks models by availability, speed, and context length
 - **External Reporting**: Other projects can report failing models via API
 - **Docker Ready**: Includes Dockerfile and docker-compose with Traefik integration
@@ -117,8 +117,8 @@ Environment variables (see `.env.example`):
 | `API_KEY` | (required) | API key for accessing Freeway endpoints |
 | `OPENROUTER_API_KEY` | (required for health checks) | Your OpenRouter API key |
 | `HEALTH_CHECK_ENABLED` | `true` | Enable/disable health checks |
-| `CHECK_INTERVAL_SECONDS` | `86400` | Interval between health check cycles (24h) |
-| `CHECK_DELAY_SECONDS` | `30` | Delay between each model check |
+| `HEALTH_CHECK_HOUR` | `0` | Hour to run daily health check (0-23, UTC) |
+| `CHECK_DELAY_SECONDS` | `60` | Delay between each model check (seconds) |
 | `HISTORY_SIZE` | `20` | Number of health results to keep per model |
 | `REQUEST_TIMEOUT_SECONDS` | `30` | Timeout for API requests |
 

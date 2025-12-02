@@ -53,14 +53,12 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Could not fetch account info: {e}")
 
-        hours = settings.CHECK_INTERVAL_SECONDS / 3600
         model_count = len(memory_store.get_all_model_ids())
         cycle_mins = model_count * settings.CHECK_DELAY_SECONDS / 60
-        logger.info(f"Check interval: {hours:.1f} hours | Delay: {settings.CHECK_DELAY_SECONDS}s | Cycle: ~{cycle_mins:.0f} min for {model_count} models")
+        logger.info(f"Schedule: daily at {settings.HEALTH_CHECK_HOUR:02d}:00 UTC | Delay: {settings.CHECK_DELAY_SECONDS}s | Cycle: ~{cycle_mins:.0f} min for {model_count} models")
 
-        # Start background scheduler (no initial burst - let it run gradually)
+        # Start background scheduler
         start_scheduler()
-        logger.info("Health checks will start with first scheduled run")
     else:
         if not settings.OPENROUTER_API_KEY:
             logger.info("Health checks DISABLED (no API key set)")

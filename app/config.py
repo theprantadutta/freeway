@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Health Check Settings
     HEALTH_CHECK_ENABLED: bool = True  # Set to False to disable health checks
-    CHECK_INTERVAL_SECONDS: int = 86400  # Default 24 hours (once per day)
+    HEALTH_CHECK_HOUR: int = 0  # Hour to run daily health check (0-23, default midnight UTC)
     HISTORY_SIZE: int = 20  # Last N results per model
     REQUEST_TIMEOUT_SECONDS: int = 30  # Timeout for API requests
     CHECK_DELAY_SECONDS: float = 60.0  # Delay between checks (60s for free models)
