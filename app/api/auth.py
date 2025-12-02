@@ -14,16 +14,10 @@ async def require_api_key(api_key: str = Security(api_key_header)) -> str:
     Dependency that validates the API key from X-Api-Key header.
     Raises 401 if missing or invalid.
     """
-    if not api_key:
+    if not api_key or api_key != settings.API_KEY:
         raise HTTPException(
             status_code=401,
-            detail="Missing API key. Provide X-Api-Key header.",
-        )
-
-    if api_key != settings.API_KEY:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid API key.",
+            detail="Unauthorized",
         )
 
     return api_key
