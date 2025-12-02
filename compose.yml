@@ -1,0 +1,19 @@
+services:
+  freeway:
+    build: .
+    container_name: freeway
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.freeway.rule=Host(`freeway.pranta.dev`)"
+      - "traefik.http.routers.freeway.entrypoints=websecure"
+      - "traefik.http.routers.freeway.tls.certresolver=letsencrypt"
+      - "traefik.http.services.freeway.loadbalancer.server.port=8000"
+
+networks:
+  proxy:
+    external: true
