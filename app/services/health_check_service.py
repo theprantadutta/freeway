@@ -11,8 +11,9 @@ from app.storage.memory_store import memory_store
 
 logger = logging.getLogger(__name__)
 
-# How long to wait when rate limited (429)
-RATE_LIMIT_WAIT_SECONDS = 60
+# Rate limit retry settings
+RATE_LIMIT_WAIT_SECONDS = 180  # 3 minutes wait on 429
+MAX_RETRIES = 3  # Retry up to 3 times before giving up
 
 
 class HealthCheckService:
@@ -33,11 +34,14 @@ class HealthCheckService:
         """Run health check for a single model with retry on rate limit."""
         result = await openrouter_service.test_model(model_id)
 
-        # If rate limited (429), wait and retry once
-        if self._is_rate_limited(result):
-            logger.warning(f"Rate limited on {model_id}, waiting {RATE_LIMIT_WAIT_SECONDS}s before retry...")
+        # If rate limited (429), retry with exponential backoff
+        retry_count = 0
+        while self._is_rate_limited(result) and retry_count < MAX_RETRIES:
+            retry_count += 1
+            wait_time = RATE_LIMIT_WAIT_SECONDS * retry_count  # 3min, 6min, 9min
+            logger.warning(f"Rate limited on {model_id}, attempt {retry_count}/{MAX_RETRIES}, waiting {wait_time}s...")
             try:
-                await asyncio.sleep(RATE_LIMIT_WAIT_SECONDS)
+                await asyncio.sleep(wait_time)
                 result = await openrouter_service.test_model(model_id)
             except asyncio.CancelledError:
                 logger.info("Retry interrupted (shutdown)")

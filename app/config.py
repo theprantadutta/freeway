@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     CHECK_INTERVAL_SECONDS: int = 86400  # Default 24 hours (once per day)
     HISTORY_SIZE: int = 20  # Last N results per model
     REQUEST_TIMEOUT_SECONDS: int = 30  # Timeout for API requests
-    CHECK_DELAY_SECONDS: float = 30.0  # Delay between checks (30s with paid account)
+    CHECK_DELAY_SECONDS: float = 60.0  # Delay between checks (60s for free models)
 
     # Test prompt for health checks
     TEST_PROMPT: str = "Say hi"
