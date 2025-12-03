@@ -1,4 +1,4 @@
-"""Freeway - OpenRouter Model Selector."""
+"""Freeway - OpenRouter AI Gateway."""
 
 import logging
 from contextlib import asynccontextmanager
@@ -6,12 +6,16 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 
 from app.api.auth import require_api_key
+from app.api.admin import router as admin_router
 from app.api.routes import router
+from app.api.chat import router as chat_router
 from app.config import settings
+from app.db.connection import init_db, close_db
 from app.scheduler import start_scheduler, stop_scheduler
 from app.services.openrouter_service import openrouter_service
 from app.services.ranking_service import ranking_service
 from app.storage.memory_store import memory_store
+from app.storage.project_cache import project_cache
 
 # Configure logging
 logging.basicConfig(
@@ -28,6 +32,23 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     logger.info(f"Starting {settings.PROJECT_NAME}")
     logger.info("=" * 60)
+
+    # Initialize database
+    db_available = False
+    try:
+        await init_db()
+        db_available = True
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        logger.warning("Continuing without database - some features will be unavailable")
+
+    # Load project cache from database
+    if db_available:
+        try:
+            count = await project_cache.load_from_db()
+            logger.info(f"Loaded {count} projects into cache")
+        except Exception as e:
+            logger.error(f"Failed to load project cache: {e}")
 
     # Fetch and categorize models
     logger.info("Fetching models from OpenRouter...")
@@ -55,13 +76,14 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down...")
     stop_scheduler()
+    await close_db()
     logger.info("Shutdown complete")
 
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="Select best free and cheapest paid OpenRouter models",
-    version="1.0.0",
+    description="OpenRouter AI Gateway with project management and analytics",
+    version="2.0.0",
     lifespan=lifespan,
     docs_url=None,  # Disable public docs
     redoc_url=None,  # Disable public redoc
@@ -70,6 +92,8 @@ app = FastAPI(
 
 # Include API routes
 app.include_router(router)
+app.include_router(chat_router)
+app.include_router(admin_router)
 
 
 @app.get("/")
@@ -77,14 +101,16 @@ async def root(_: str = Depends(require_api_key)):
     """Root endpoint with service information."""
     return {
         "service": "freeway",
-        "description": "OpenRouter Model Selector",
-        "version": "1.0.0",
+        "description": "OpenRouter AI Gateway",
+        "version": "2.0.0",
         "endpoints": {
+            "chat_completions": "/chat/completions",
             "free_model": "/model/free",
             "paid_model": "/model/paid",
             "all_free_models": "/models/free",
             "all_paid_models": "/models/paid",
             "health": "/health",
+            "admin": "/admin/*",
         },
     }
 

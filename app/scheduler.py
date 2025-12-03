@@ -1,13 +1,15 @@
-"""Background scheduler for daily model refresh using APScheduler."""
+"""Background scheduler for daily tasks using APScheduler."""
 
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.services.openrouter_service import openrouter_service
 from app.services.ranking_service import ranking_service
 from app.storage.memory_store import memory_store
+from app.storage.project_cache import project_cache
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +52,24 @@ async def refresh_models():
         logger.error(f"Error in scheduled model refresh: {e}")
 
 
-def start_scheduler():
-    """Start the background scheduler with daily cron job at midnight UTC."""
+async def refresh_project_cache():
+    """
+    Scheduled task: refresh project cache from database.
+
+    Reloads all active projects into memory for API key validation.
+    """
     try:
-        # Add the refresh job - runs daily at midnight (00:00 UTC)
+        logger.info("Starting scheduled project cache refresh...")
+        count = await project_cache.load_from_db()
+        logger.info(f"Project cache refresh complete: {count} projects loaded")
+    except Exception as e:
+        logger.error(f"Error in scheduled project cache refresh: {e}")
+
+
+def start_scheduler():
+    """Start the background scheduler with scheduled jobs."""
+    try:
+        # Add model refresh job - runs daily at midnight (00:00 UTC)
         scheduler.add_job(
             refresh_models,
             trigger=CronTrigger(hour=0, minute=0, timezone="UTC"),
@@ -62,8 +78,19 @@ def start_scheduler():
             replace_existing=True,
         )
 
+        # Add project cache refresh job - runs every 24 hours
+        scheduler.add_job(
+            refresh_project_cache,
+            trigger=IntervalTrigger(hours=24),
+            id="project_cache_refresh_job",
+            name="Project Cache Refresh",
+            replace_existing=True,
+        )
+
         scheduler.start()
-        logger.info("Scheduler started - model refresh daily at 00:00 UTC")
+        logger.info("Scheduler started:")
+        logger.info("  - Model refresh: daily at 00:00 UTC")
+        logger.info("  - Project cache refresh: every 24 hours")
 
     except Exception as e:
         logger.error(f"Failed to start scheduler: {e}")

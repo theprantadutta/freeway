@@ -5,8 +5,12 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - proxy
+      - internal
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.freeway.rule=Host(`freeway.pranta.dev`)"
@@ -14,6 +18,29 @@ services:
       - "traefik.http.routers.freeway.tls.certresolver=letsencrypt"
       - "traefik.http.services.freeway.loadbalancer.server.port=8000"
 
+  db:
+    image: postgres:16-alpine
+    container_name: freeway-db
+    environment:
+      POSTGRES_USER: ${DB_USER:-freeway}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-freeway}
+    volumes:
+      - freeway_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-freeway}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    restart: unless-stopped
+
+volumes:
+  freeway_db:
+
 networks:
   proxy:
     external: true
+  internal:
+    driver: bridge

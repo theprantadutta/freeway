@@ -1,128 +1,147 @@
 # Freeway
 
-A lightweight FastAPI service that selects the best free and cheapest paid OpenRouter models for your projects.
+An AI Gateway that proxies requests to OpenRouter with project management, usage tracking, and analytics.
 
 ## Overview
 
-Freeway fetches all models from OpenRouter, categorizes them as free or paid, and automatically selects:
-- **Best Free Model**: Ranked by context length (larger is better)
-- **Cheapest Paid Model**: Ranked by price (lower prompt + completion cost)
-
-Models are refreshed daily at midnight UTC. Free model selection auto-updates, paid model stays fixed.
+Freeway is a full-featured AI Gateway built with FastAPI that:
+- Proxies chat completion requests to OpenRouter
+- Manages projects with individual API keys
+- Tracks usage, costs, and analytics per project
+- Automatically selects best free and cheapest paid models
+- Provides a complete admin API for management
 
 ## Features
 
-- **API Key Authentication**: All endpoints require `X-Api-Key` header
-- **Automatic Model Discovery**: Fetches and categorizes all OpenRouter models
-- **Separate Endpoints**: Dedicated endpoints for free and paid models
-- **Daily Refresh**: Scheduler updates model list at midnight UTC
-- **Full Model Details**: Returns pricing, context length, and description
-- **Docker Ready**: Includes Dockerfile and docker-compose with Traefik integration
+- **OpenAI-Compatible Chat Endpoint**: `POST /chat/completions` with model selection (`free`, `paid`, or specific model ID)
+- **Project Management**: Create projects with individual API keys, rate limits, and metadata
+- **Usage Tracking**: Logs all requests with tokens, costs, and response times
+- **Admin Analytics**: Usage summaries, per-project stats, and detailed logs
+- **Model Selection**: Auto-selects best free model (by context) and cheapest paid model (by price)
+- **Daily Refresh**: Models updated at midnight UTC
+- **PostgreSQL Storage**: Persistent storage for projects and usage data
+- **Docker Ready**: Includes docker-compose with PostgreSQL
 
 ## Authentication
 
-All API endpoints require authentication via the `X-Api-Key` header.
+Freeway uses two types of API keys:
 
-```bash
-curl -H "X-Api-Key: your-api-key" http://localhost:8000/model/free
-```
-
-Without a valid API key, requests return `401 Unauthorized`.
-
-**Note**: Swagger/OpenAPI docs are disabled in production for security.
+| Key Type | Header | Used For |
+|----------|--------|----------|
+| Admin Key | `X-Api-Key` | Admin endpoints, model info, control panel |
+| Project Key | `X-Api-Key` | Chat completions endpoint |
 
 ## API Endpoints
 
-### GET /model/free
+### Chat Completions (Project Key)
 
-Returns the best free model (highest context length).
+```bash
+POST /chat/completions
+```
 
+OpenAI-compatible chat completion endpoint.
+
+**Request:**
 ```json
 {
-  "model_id": "x-ai/grok-4.1-fast:free",
-  "model_name": "xAI: Grok 4.1 Fast (free)",
-  "description": "Grok 4.1 Fast is xAI's best agentic tool calling model...",
-  "context_length": 2000000,
-  "pricing": {
-    "prompt": "0",
-    "completion": "0"
+  "model": "free",
+  "messages": [
+    {"role": "user", "content": "Hello!"}
+  ],
+  "temperature": 0.7,
+  "max_tokens": 1000
+}
+```
+
+**Model options:**
+- `"free"` - Use best free model (auto-selected)
+- `"paid"` - Use cheapest paid model (auto-selected)
+- `"<model_id>"` - Use specific model by ID
+
+**Response:**
+```json
+{
+  "id": "chatcmpl-abc123",
+  "created": 1234567890,
+  "model": "x-ai/grok-4.1-fast:free",
+  "choices": [
+    {
+      "index": 0,
+      "message": {"role": "assistant", "content": "Hello! How can I help?"},
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 20,
+    "total_tokens": 30
   }
 }
 ```
 
-### GET /model/paid
+### Model Endpoints (Admin or Project Key)
 
-Returns the cheapest paid model (lowest prompt + completion cost).
+```bash
+GET /model/free      # Best free model
+GET /model/paid      # Cheapest paid model
+GET /models/free     # All free models (ranked by context)
+GET /models/paid     # All paid models (ranked by price)
+GET /health          # Service health check
+```
 
+### Admin Endpoints (Admin Key Only)
+
+#### Project Management
+
+```bash
+GET    /admin/projects              # List all projects
+POST   /admin/projects              # Create project (returns API key ONCE)
+GET    /admin/projects/{id}         # Get project
+PATCH  /admin/projects/{id}         # Update project
+DELETE /admin/projects/{id}         # Delete project
+POST   /admin/projects/{id}/rotate-key  # Rotate API key
+```
+
+**Create Project Request:**
 ```json
 {
-  "model_id": "meta-llama/llama-3.2-3b-instruct",
-  "model_name": "Meta: Llama 3.2 3B Instruct",
-  "description": "Llama 3.2 3B is a 3-billion-parameter multilingual model...",
-  "context_length": 131072,
-  "pricing": {
-    "prompt": "0.00000002",
-    "completion": "0.00000002"
-  }
+  "name": "My Project",
+  "rate_limit_per_minute": 60,
+  "metadata": {"team": "backend"}
 }
 ```
 
-### GET /models/free
-
-Returns all free models ranked by context length (largest first).
-
+**Create Project Response:**
 ```json
 {
-  "models": [
-    {
-      "model_id": "x-ai/grok-4.1-fast:free",
-      "model_name": "xAI: Grok 4.1 Fast (free)",
-      "context_length": 2000000,
-      "pricing": {"prompt": "0", "completion": "0"},
-      "rank": 1
-    },
-    ...
-  ],
-  "total_count": 30,
-  "last_updated": "2025-12-03T00:00:00Z"
+  "id": "uuid",
+  "name": "My Project",
+  "api_key": "fw_abc123...",
+  "api_key_prefix": "fw_abc12",
+  "rate_limit_per_minute": 60,
+  "is_active": true,
+  "created_at": "2025-01-01T00:00:00Z"
 }
 ```
 
-### GET /models/paid
+> **Important:** The `api_key` is only shown once on create or rotate. Store it securely!
 
-Returns all paid models ranked by price (cheapest first).
+#### Analytics
 
-```json
-{
-  "models": [
-    {
-      "model_id": "meta-llama/llama-3.2-3b-instruct",
-      "model_name": "Meta: Llama 3.2 3B Instruct",
-      "context_length": 131072,
-      "pricing": {"prompt": "0.00000002", "completion": "0.00000002"},
-      "rank": 1
-    },
-    ...
-  ],
-  "total_count": 305,
-  "last_updated": "2025-12-03T00:00:00Z"
-}
+```bash
+GET /admin/analytics/summary        # Global summary
+GET /admin/analytics/usage?project_id={id}  # Project usage stats
+GET /admin/analytics/logs?project_id={id}   # Detailed usage logs
 ```
 
-### GET /health
-
-Service health check endpoint.
-
+**Global Summary Response:**
 ```json
 {
-  "status": "healthy",
-  "service": "freeway",
-  "version": "1.0.0",
-  "free_models_count": 30,
-  "paid_models_count": 305,
-  "selected_free_model": "x-ai/grok-4.1-fast:free",
-  "selected_paid_model": "meta-llama/llama-3.2-3b-instruct",
-  "last_refresh": "2025-12-03T00:00:00Z"
+  "total_projects": 5,
+  "active_projects": 4,
+  "total_requests_today": 1250,
+  "total_requests_this_month": 45000,
+  "total_cost_this_month_usd": 12.50
 }
 ```
 
@@ -130,11 +149,16 @@ Service health check endpoint.
 
 Environment variables (see `.env.example`):
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `API_KEY` | (required) | API key for accessing Freeway endpoints |
-| `OPENROUTER_API_KEY` | - | OpenRouter API key (for future use) |
-| `REQUEST_TIMEOUT_SECONDS` | `30` | Timeout for API requests |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ADMIN_API_KEY` | Yes | Admin API key for control panel |
+| `OPENROUTER_API_KEY` | Yes | OpenRouter API key for chat completions |
+| `DATABASE_URL` | No | PostgreSQL connection string |
+| `DB_HOST` | No | Database host (default: localhost) |
+| `DB_PORT` | No | Database port (default: 5432) |
+| `DB_USER` | No | Database user (default: freeway) |
+| `DB_PASSWORD` | No | Database password |
+| `DB_NAME` | No | Database name (default: freeway) |
 
 ## Quick Start
 
@@ -153,7 +177,10 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env and set API_KEY
+# Edit .env and set ADMIN_API_KEY and OPENROUTER_API_KEY
+
+# Start PostgreSQL (or use Docker)
+# ...
 
 # Run
 uvicorn app.main:app --reload
@@ -162,11 +189,14 @@ uvicorn app.main:app --reload
 ### Docker
 
 ```bash
-# Build and run
+# Start all services (API + PostgreSQL)
 docker compose up -d --build
 
 # View logs
 docker compose logs -f freeway
+
+# Stop services
+docker compose down
 ```
 
 ## Project Structure
@@ -175,48 +205,98 @@ docker compose logs -f freeway
 freeway/
 ├── app/
 │   ├── api/
-│   │   ├── auth.py             # API key authentication
-│   │   └── routes.py           # API endpoints
+│   │   ├── auth.py             # Dual authentication (admin/project)
+│   │   ├── routes.py           # Model endpoints
+│   │   ├── chat.py             # Chat completions endpoint
+│   │   └── admin.py            # Admin CRUD & analytics
+│   ├── db/
+│   │   ├── connection.py       # Async database pool
+│   │   └── repositories/
+│   │       ├── project_repo.py
+│   │       └── usage_repo.py
 │   ├── models/
-│   │   └── openrouter.py       # OpenRouter API models
+│   │   ├── openrouter.py       # OpenRouter API models
+│   │   └── database.py         # SQLAlchemy ORM models
 │   ├── schemas/
-│   │   └── responses.py        # API response schemas
+│   │   ├── responses.py        # Model response schemas
+│   │   ├── chat.py             # Chat completion schemas
+│   │   ├── projects.py         # Project schemas
+│   │   └── analytics.py        # Analytics schemas
 │   ├── services/
-│   │   ├── openrouter_service.py    # OpenRouter API client
-│   │   └── ranking_service.py       # Model ranking/selection
+│   │   ├── openrouter_service.py  # OpenRouter API client
+│   │   ├── ranking_service.py     # Model ranking/selection
+│   │   ├── project_service.py     # Project management
+│   │   └── usage_service.py       # Usage tracking
 │   ├── storage/
-│   │   └── memory_store.py     # In-memory data store
+│   │   ├── memory_store.py     # In-memory model cache
+│   │   └── project_cache.py    # In-memory project cache
 │   ├── config.py               # Configuration
 │   ├── main.py                 # FastAPI application
-│   └── scheduler.py            # Daily model refresh scheduler
+│   └── scheduler.py            # Daily refresh scheduler
 ├── Dockerfile
 ├── compose.yml
 ├── requirements.txt
 └── .env.example
 ```
 
-## Usage Example
+## Usage Examples
 
-From another project, get the best free model:
+### Create a Project and Make a Request
 
 ```python
 import httpx
 
 FREEWAY_URL = "http://localhost:8000"
-FREEWAY_API_KEY = "your-freeway-api-key"
+ADMIN_KEY = "your-admin-key"
 
-headers = {"X-Api-Key": FREEWAY_API_KEY}
+# 1. Create a project
+response = httpx.post(
+    f"{FREEWAY_URL}/admin/projects",
+    headers={"X-Api-Key": ADMIN_KEY},
+    json={"name": "My App", "rate_limit_per_minute": 100}
+)
+project = response.json()
+project_key = project["api_key"]  # Save this!
 
-# Get best free model
-response = httpx.get(f"{FREEWAY_URL}/model/free", headers=headers)
-free_model = response.json()
-print(f"Best free: {free_model['model_id']}")
-
-# Get cheapest paid model
-response = httpx.get(f"{FREEWAY_URL}/model/paid", headers=headers)
-paid_model = response.json()
-print(f"Cheapest paid: {paid_model['model_id']}")
+# 2. Use the project key for chat completions
+response = httpx.post(
+    f"{FREEWAY_URL}/chat/completions",
+    headers={"X-Api-Key": project_key},
+    json={
+        "model": "free",
+        "messages": [{"role": "user", "content": "Hello!"}]
+    }
+)
+completion = response.json()
+print(completion["choices"][0]["message"]["content"])
 ```
+
+### Check Usage Analytics
+
+```python
+# Get project usage
+response = httpx.get(
+    f"{FREEWAY_URL}/admin/analytics/usage",
+    headers={"X-Api-Key": ADMIN_KEY},
+    params={"project_id": project["id"]}
+)
+usage = response.json()
+print(f"Total requests: {usage['summary']['total_requests']}")
+print(f"Total cost: ${usage['summary']['total_cost_usd']:.4f}")
+```
+
+## Flutter Control Panel
+
+A Flutter control panel is available at `../control_plane` for managing Freeway:
+
+- Dashboard with stats and selected models
+- Browse and search all available models
+- Create, edit, and delete projects
+- View API keys and rotate them
+- Light/dark theme support
+- Responsive design (mobile, tablet, desktop)
+
+See `../control_plane/README.md` for setup instructions.
 
 ## Deployment
 
@@ -224,15 +304,30 @@ The included `compose.yml` is configured for Traefik reverse proxy:
 
 - Domain: `freeway.pranta.dev` (configure in compose.yml)
 - TLS: Automatic via Let's Encrypt
-- Network: External `proxy` network (must exist)
+- Network: External `proxy` network
 
 ## How It Works
 
-1. **On startup**: Fetches all models from OpenRouter API
-2. **Categorization**: Splits models into free (`:free` suffix) and paid
-3. **Selection**:
+1. **On startup**:
+   - Initializes PostgreSQL connection
+   - Loads project cache from database
+   - Fetches models from OpenRouter API
+
+2. **Model categorization**:
+   - Free models: Have `:free` suffix or zero pricing
+   - Paid models: Everything else
+
+3. **Model selection**:
    - Free: Best = largest context length
-   - Paid: Best = lowest (prompt + completion) cost
-4. **Daily refresh**: Scheduler runs at midnight UTC to update models
-5. **Auto-update**: Free model selection updates if better model available
-6. **Fixed paid**: Paid model selection stays fixed (not auto-updated)
+   - Paid: Best = lowest combined price
+
+4. **Daily refresh**:
+   - Scheduler runs at midnight UTC
+   - Updates model list
+   - Refreshes project cache
+
+5. **Request flow**:
+   - Project key validated against cache
+   - Model resolved (free/paid/specific)
+   - Request proxied to OpenRouter
+   - Usage logged asynchronously
