@@ -5,7 +5,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 
 from app.config import settings
 
@@ -41,6 +41,22 @@ def get_head_revision():
     return script.get_current_head()
 
 
+def tables_exist():
+    """Check if our application tables already exist."""
+    engine = create_engine(
+        get_sync_url(),
+        connect_args={"connect_timeout": 10},
+    )
+    try:
+        with engine.connect() as conn:
+            inspector = inspect(conn)
+            existing = inspector.get_table_names()
+            # Check for our main tables
+            return 'projects' in existing and 'usage_logs' in existing
+    finally:
+        engine.dispose()
+
+
 def run_migrations():
     """Run alembic migrations to head."""
     logger.info("Checking database migrations...")
@@ -51,6 +67,14 @@ def run_migrations():
 
         if current == head:
             logger.info(f"Database is up to date (revision: {current})")
+            return
+
+        # If no revision but tables exist, stamp instead of migrate
+        if current is None and tables_exist():
+            logger.info("Tables exist but no alembic version - stamping current state")
+            alembic_cfg = Config("alembic.ini")
+            command.stamp(alembic_cfg, head)
+            logger.info(f"Database stamped at revision: {head}")
             return
 
         logger.info(f"Current revision: {current}, target: {head}")
