@@ -11,6 +11,7 @@ from app.api.routes import router
 from app.api.chat import router as chat_router
 from app.config import settings
 from app.db.connection import init_db, close_db
+from app.db.migrations import run_migrations
 from app.scheduler import start_scheduler, stop_scheduler
 from app.services.openrouter_service import openrouter_service
 from app.services.ranking_service import ranking_service
@@ -33,7 +34,14 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.PROJECT_NAME}")
     logger.info("=" * 60)
 
-    # Initialize database
+    # Run database migrations first
+    try:
+        run_migrations()
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+        logger.warning("Continuing without migrations - database may not be ready")
+
+    # Initialize database connection
     db_available = False
     try:
         await init_db()
