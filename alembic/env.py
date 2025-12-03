@@ -1,7 +1,7 @@
 import logging
 from logging.config import fileConfig
 
-from sqlalchemy import create_engine, pool
+from sqlalchemy import create_engine, pool, text
 
 from alembic import context
 
@@ -42,13 +42,14 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
+    """Run migrations in 'online' mode with autocommit."""
     connectable = create_engine(
         get_url(),
         poolclass=pool.NullPool,
         connect_args={
-            "connect_timeout": 10,  # Connection timeout in seconds
+            "connect_timeout": 10,
         },
+        isolation_level="AUTOCOMMIT",  # Use autocommit to avoid transaction issues
     )
 
     try:
@@ -57,9 +58,7 @@ def run_migrations_online() -> None:
                 connection=connection,
                 target_metadata=target_metadata,
             )
-
-            with context.begin_transaction():
-                context.run_migrations()
+            context.run_migrations()
     finally:
         connectable.dispose()
 
