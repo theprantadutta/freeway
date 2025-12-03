@@ -1,4 +1,4 @@
-"""Freeway - OpenRouter Free Models Health Monitor."""
+"""Freeway - OpenRouter Model Selector."""
 
 import logging
 from contextlib import asynccontextmanager
@@ -9,8 +9,8 @@ from app.api.auth import require_api_key
 from app.api.routes import router
 from app.config import settings
 from app.scheduler import start_scheduler, stop_scheduler
-from app.services.health_check_service import health_check_service
 from app.services.openrouter_service import openrouter_service
+from app.services.ranking_service import ranking_service
 from app.storage.memory_store import memory_store
 
 # Configure logging
@@ -29,41 +29,24 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.PROJECT_NAME}")
     logger.info("=" * 60)
 
-    # Always fetch the free models list on startup
-    logger.info("Fetching free models list...")
+    # Fetch and categorize models
+    logger.info("Fetching models from OpenRouter...")
     try:
-        count = await health_check_service.refresh_free_models()
-        logger.info(f"Loaded {count} free models")
+        free_models, paid_models = await openrouter_service.fetch_and_categorize_models()
+        memory_store.update_models(free_models, paid_models)
+        logger.info(f"Loaded {len(free_models)} free models, {len(paid_models)} paid models")
+
+        # Select best free model (auto-updated daily)
+        ranking_service.select_best_free_model()
+
+        # Select cheapest paid model (fixed, not auto-updated)
+        ranking_service.select_cheapest_paid_model()
+
     except Exception as e:
         logger.error(f"Failed to fetch models: {e}")
 
-    # Only run health checks if enabled and API key is set
-    if settings.HEALTH_CHECK_ENABLED and settings.OPENROUTER_API_KEY:
-        logger.info("Health checks ENABLED")
-
-        # Show account credits
-        try:
-            account_info = await openrouter_service.get_account_info()
-            data = account_info.get("data", {})
-            credits = data.get("limit_remaining")
-            if credits is not None:
-                logger.info(f"OpenRouter credits remaining: ${credits:.4f}")
-            else:
-                logger.info("OpenRouter account: unlimited credits")
-        except Exception as e:
-            logger.warning(f"Could not fetch account info: {e}")
-
-        model_count = len(memory_store.get_all_model_ids())
-        cycle_mins = model_count * settings.CHECK_DELAY_SECONDS / 60
-        logger.info(f"Schedule: daily at {settings.HEALTH_CHECK_HOUR:02d}:00 UTC | Delay: {settings.CHECK_DELAY_SECONDS}s | Cycle: ~{cycle_mins:.0f} min for {model_count} models")
-
-        # Start background scheduler
-        start_scheduler()
-    else:
-        if not settings.OPENROUTER_API_KEY:
-            logger.info("Health checks DISABLED (no API key set)")
-        else:
-            logger.info("Health checks DISABLED (HEALTH_CHECK_ENABLED=false)")
+    # Start the scheduler for daily model refresh
+    start_scheduler()
 
     logger.info("=" * 60)
 
@@ -71,14 +54,13 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down...")
-    if settings.HEALTH_CHECK_ENABLED and settings.OPENROUTER_API_KEY:
-        stop_scheduler()
+    stop_scheduler()
     logger.info("Shutdown complete")
 
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="Monitor and rank OpenRouter free models by availability and speed",
+    description="Select best free and cheapest paid OpenRouter models",
     version="1.0.0",
     lifespan=lifespan,
     docs_url=None,  # Disable public docs
@@ -95,13 +77,14 @@ async def root(_: str = Depends(require_api_key)):
     """Root endpoint with service information."""
     return {
         "service": "freeway",
-        "description": "OpenRouter Free Models Health Monitor",
+        "description": "OpenRouter Model Selector",
         "version": "1.0.0",
         "endpoints": {
-            "best_model": "/model",
-            "all_models": "/models",
+            "free_model": "/model/free",
+            "paid_model": "/model/paid",
+            "all_free_models": "/models/free",
+            "all_paid_models": "/models/paid",
             "health": "/health",
-            "report": "/report",
         },
     }
 

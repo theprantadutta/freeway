@@ -5,29 +5,41 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
-from app.models.health_check import HealthStatus
+
+class PricingInfo(BaseModel):
+    """Pricing information for a model."""
+
+    prompt: str
+    completion: str
 
 
 class ModelResponse(BaseModel):
-    """Response for a single model with stats."""
+    """Response for a single model."""
 
     model_id: str
     model_name: str
-    context_length: Optional[int]
-    availability_score: float
-    avg_response_time_ms: Optional[float]
-    last_check: Optional[datetime]
-    last_status: Optional[HealthStatus]
-    rank: int
-    score: Optional[float] = None  # Composite ranking score (0-100)
+    description: Optional[str] = None
+    context_length: Optional[int] = None
+    pricing: PricingInfo
+    rank: Optional[int] = None
 
 
 class ModelListResponse(BaseModel):
-    """Response for GET /models endpoint."""
+    """Response for listing models."""
 
     models: List[ModelResponse]
     total_count: int
-    last_updated: Optional[datetime]
+    last_updated: Optional[datetime] = None
+
+
+class SelectedModelResponse(BaseModel):
+    """Response for the selected model endpoint."""
+
+    model_id: str
+    model_name: str
+    description: Optional[str] = None
+    context_length: Optional[int] = None
+    pricing: PricingInfo
 
 
 class HealthResponse(BaseModel):
@@ -36,21 +48,8 @@ class HealthResponse(BaseModel):
     status: str
     service: str
     version: str
-    models_monitored: int
-    health_checks_enabled: bool
-    last_check_run: Optional[datetime]
-
-
-class ReportRequest(BaseModel):
-    """Request body for POST /report endpoint."""
-
-    model_id: str
-
-
-class ReportResponse(BaseModel):
-    """Response for POST /report endpoint."""
-
-    model_id: str
-    action: str  # "removed", "kept", "not_found"
-    message: str
-    health_check_passed: Optional[bool] = None
+    free_models_count: int
+    paid_models_count: int
+    selected_free_model: Optional[str] = None
+    selected_paid_model: Optional[str] = None
+    last_refresh: Optional[datetime] = None

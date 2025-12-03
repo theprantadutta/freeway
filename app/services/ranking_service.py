@@ -1,113 +1,118 @@
-"""Model ranking service with scoring algorithm."""
+"""Model ranking service for selecting best free and cheapest paid models."""
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
-from app.models.health_check import ModelHealthStats
+from app.models.openrouter import OpenRouterModel
 from app.storage.memory_store import memory_store
 
 logger = logging.getLogger(__name__)
 
-# Scoring weights (higher = more important)
-WEIGHT_AVAILABILITY = 50  # Availability is most important
-WEIGHT_SPEED = 30  # Response time matters
-WEIGHT_CONTEXT = 20  # Context length is a bonus
-
-# Thresholds
-MAX_LATENCY_MS = 30000  # 30 seconds - anything slower scores 0 for speed
-MIN_CONTEXT_LENGTH = 4096  # Minimum useful context
-MAX_CONTEXT_LENGTH = 200000  # Maximum for scoring (after this, no extra points)
-
 
 class RankingService:
     """
-    Service for ranking models using a weighted scoring algorithm.
+    Service for ranking and selecting models.
 
-    Scoring formula:
-    - Availability (50%): Direct percentage (0-100%)
-    - Speed (30%): Inverse of latency, normalized
-    - Context (20%): Normalized context length bonus
-
-    Total score = weighted sum, higher is better.
+    - Free models: Ranked by context length (larger is better)
+    - Paid models: Ranked by price (cheaper is better)
     """
 
-    def calculate_score(self, stats: ModelHealthStats) -> Tuple[float, dict]:
+    def get_best_free_model(self) -> Optional[OpenRouterModel]:
         """
-        Calculate a composite score for a model.
-        Returns (score, breakdown_dict).
+        Get the best free model based on context length.
+        Larger context length = better model.
         """
-        breakdown = {}
+        free_models = memory_store.get_all_free_models()
 
-        # Availability score (0-50 points)
-        availability_score = stats.availability_score * WEIGHT_AVAILABILITY
-        breakdown["availability"] = round(availability_score, 2)
+        if not free_models:
+            return None
 
-        # Speed score (0-30 points) - lower latency = higher score
-        if stats.avg_response_time_ms and stats.avg_response_time_ms > 0:
-            # Normalize: fast (500ms) = 30 points, slow (30s) = 0 points
-            latency_normalized = max(0, 1 - (stats.avg_response_time_ms / MAX_LATENCY_MS))
-            speed_score = latency_normalized * WEIGHT_SPEED
-        else:
-            speed_score = 0  # No data = no speed score
-        breakdown["speed"] = round(speed_score, 2)
+        # Sort by context length descending (largest first)
+        sorted_models = sorted(
+            free_models,
+            key=lambda m: m.context_length or 0,
+            reverse=True,
+        )
 
-        # Context length score (0-20 points)
-        context = stats.context_length or MIN_CONTEXT_LENGTH
-        if context >= MIN_CONTEXT_LENGTH:
-            # Normalize between min and max
-            context_normalized = min(1, (context - MIN_CONTEXT_LENGTH) / (MAX_CONTEXT_LENGTH - MIN_CONTEXT_LENGTH))
-            context_score = context_normalized * WEIGHT_CONTEXT
-        else:
-            context_score = 0
-        breakdown["context"] = round(context_score, 2)
+        return sorted_models[0]
 
-        total_score = availability_score + speed_score + context_score
-        breakdown["total"] = round(total_score, 2)
-
-        return total_score, breakdown
-
-    def get_ranked_models(self) -> List[ModelHealthStats]:
+    def get_cheapest_paid_model(self) -> Optional[OpenRouterModel]:
         """
-        Get all models ranked by composite score (highest first).
-
-        Ranking criteria (weighted):
-        1. Availability (50%) - Must be reliable
-        2. Speed (30%) - Lower latency is better
-        3. Context length (20%) - Larger context is a bonus
+        Get the cheapest paid model based on pricing.
+        Lower total cost (prompt + completion) = better.
         """
-        model_ids = memory_store.get_all_model_ids()
-        scored_models = []
+        paid_models = memory_store.get_all_paid_models()
 
-        for model_id in model_ids:
-            stats = memory_store.get_model_stats(model_id)
-            if stats:
-                score, _ = self.calculate_score(stats)
-                scored_models.append((score, stats))
+        if not paid_models:
+            return None
 
-        # Sort by score descending (highest first)
-        scored_models.sort(key=lambda x: x[0], reverse=True)
+        def get_total_cost(model: OpenRouterModel) -> float:
+            """Calculate total cost per token (prompt + completion)."""
+            try:
+                prompt_cost = float(model.pricing.prompt)
+                completion_cost = float(model.pricing.completion)
+                return prompt_cost + completion_cost
+            except (ValueError, TypeError):
+                # If pricing can't be parsed, treat as very expensive
+                return float("inf")
 
-        return [stats for _, stats in scored_models]
+        # Sort by total cost ascending (cheapest first)
+        sorted_models = sorted(paid_models, key=get_total_cost)
 
-    def get_best_model(self) -> Optional[ModelHealthStats]:
-        """Get the best model based on ranking score."""
-        ranked = self.get_ranked_models()
+        # Filter out models with infinite cost (unparseable pricing)
+        valid_models = [m for m in sorted_models if get_total_cost(m) != float("inf")]
 
-        # Prefer models with at least some successful checks
-        available = [m for m in ranked if m.availability_score > 0]
+        return valid_models[0] if valid_models else sorted_models[0]
 
-        if available:
-            return available[0]
+    def get_ranked_free_models(self) -> List[OpenRouterModel]:
+        """Get all free models ranked by context length (largest first)."""
+        free_models = memory_store.get_all_free_models()
+        return sorted(
+            free_models,
+            key=lambda m: m.context_length or 0,
+            reverse=True,
+        )
 
-        # Fallback to any model if none have health data yet
-        return ranked[0] if ranked else None
+    def get_ranked_paid_models(self) -> List[OpenRouterModel]:
+        """Get all paid models ranked by price (cheapest first)."""
+        paid_models = memory_store.get_all_paid_models()
 
-    def get_model_with_score(self, model_id: str) -> Optional[Tuple[ModelHealthStats, float, dict]]:
-        """Get a specific model's stats and score breakdown."""
-        stats = memory_store.get_model_stats(model_id)
-        if stats:
-            score, breakdown = self.calculate_score(stats)
-            return stats, score, breakdown
+        def get_total_cost(model: OpenRouterModel) -> float:
+            try:
+                prompt_cost = float(model.pricing.prompt)
+                completion_cost = float(model.pricing.completion)
+                return prompt_cost + completion_cost
+            except (ValueError, TypeError):
+                return float("inf")
+
+        return sorted(paid_models, key=get_total_cost)
+
+    def select_best_free_model(self) -> Optional[str]:
+        """
+        Select and store the best free model.
+        Called on startup and by scheduler.
+        Returns the model ID if selected.
+        """
+        best = self.get_best_free_model()
+        if best:
+            memory_store.set_selected_free_model(best.id)
+            logger.info(f"Selected best free model: {best.id} (context: {best.context_length})")
+            return best.id
+        return None
+
+    def select_cheapest_paid_model(self) -> Optional[str]:
+        """
+        Select and store the cheapest paid model.
+        Only called on startup (not auto-updated).
+        Returns the model ID if selected.
+        """
+        cheapest = self.get_cheapest_paid_model()
+        if cheapest:
+            memory_store.set_selected_paid_model(cheapest.id)
+            prompt_cost = cheapest.pricing.prompt
+            completion_cost = cheapest.pricing.completion
+            logger.info(f"Selected cheapest paid model: {cheapest.id} (prompt: {prompt_cost}, completion: {completion_cost})")
+            return cheapest.id
         return None
 
 

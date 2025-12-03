@@ -1,114 +1,105 @@
-"""Thread-safe in-memory storage for health check results."""
+"""Thread-safe in-memory storage for models."""
 
-from collections import deque
 from datetime import datetime, timezone
 from threading import RLock
 from typing import Dict, List, Optional
 
-from app.config import settings
-from app.models.health_check import HealthCheckResult, HealthStatus, ModelHealthStats
 from app.models.openrouter import OpenRouterModel
 
 
 class MemoryStore:
     """
-    Thread-safe in-memory storage for model data and health results.
-    Uses deque for bounded history per model.
+    Thread-safe in-memory storage for model data.
+    Stores free and paid models separately with selected model tracking.
     """
 
-    def __init__(self, history_size: Optional[int] = None):
+    def __init__(self):
         self._lock = RLock()
-        self._history_size = history_size or settings.HISTORY_SIZE
 
-        # Store free models: model_id -> OpenRouterModel
-        self._models: Dict[str, OpenRouterModel] = {}
+        # Store models by category: model_id -> OpenRouterModel
+        self._free_models: Dict[str, OpenRouterModel] = {}
+        self._paid_models: Dict[str, OpenRouterModel] = {}
 
-        # Store health check history: model_id -> deque of HealthCheckResult
-        self._health_history: Dict[str, deque] = {}
+        # Selected models (best free, cheapest paid)
+        self._selected_free_model_id: Optional[str] = None
+        self._selected_paid_model_id: Optional[str] = None
 
         # Metadata
         self._last_models_fetch: Optional[datetime] = None
-        self._last_health_check: Optional[datetime] = None
 
-    def update_models(self, models: List[OpenRouterModel]) -> None:
-        """Update the list of monitored free models."""
+    def update_models(
+        self,
+        free_models: List[OpenRouterModel],
+        paid_models: List[OpenRouterModel],
+    ) -> None:
+        """Update the list of models."""
         with self._lock:
-            self._models = {m.id: m for m in models}
+            self._free_models = {m.id: m for m in free_models}
+            self._paid_models = {m.id: m for m in paid_models}
             self._last_models_fetch = datetime.now(timezone.utc)
 
-            # Initialize health history for new models
-            for model_id in self._models:
-                if model_id not in self._health_history:
-                    self._health_history[model_id] = deque(maxlen=self._history_size)
-
-            # Remove history for models no longer in list
-            obsolete = set(self._health_history.keys()) - set(self._models.keys())
-            for model_id in obsolete:
-                del self._health_history[model_id]
-
-    def add_health_result(self, model_id: str, result: HealthCheckResult) -> None:
-        """Add a health check result for a model."""
+    def get_all_free_models(self) -> List[OpenRouterModel]:
+        """Get all free models."""
         with self._lock:
-            if model_id in self._health_history:
-                self._health_history[model_id].append(result)
-                self._last_health_check = datetime.now(timezone.utc)
+            return list(self._free_models.values())
 
-    def get_model_stats(self, model_id: str) -> Optional[ModelHealthStats]:
-        """Calculate health statistics for a model."""
+    def get_all_paid_models(self) -> List[OpenRouterModel]:
+        """Get all paid models."""
         with self._lock:
-            if model_id not in self._models:
-                return None
+            return list(self._paid_models.values())
 
-            model = self._models[model_id]
-            history = list(self._health_history.get(model_id, []))
-
-            if not history:
-                return ModelHealthStats(
-                    model_id=model_id,
-                    model_name=model.name,
-                    context_length=model.context_length,
-                    total_checks=0,
-                    successful_checks=0,
-                    availability_score=0.0,
-                    avg_response_time_ms=None,
-                    last_check=None,
-                    last_status=None,
-                )
-
-            successful = [r for r in history if r.status == HealthStatus.SUCCESS]
-            response_times = [
-                r.response_time_ms for r in successful if r.response_time_ms is not None
-            ]
-
-            return ModelHealthStats(
-                model_id=model_id,
-                model_name=model.name,
-                context_length=model.context_length,
-                total_checks=len(history),
-                successful_checks=len(successful),
-                availability_score=len(successful) / len(history),
-                avg_response_time_ms=(
-                    sum(response_times) / len(response_times) if response_times else None
-                ),
-                last_check=history[-1].timestamp,
-                last_status=history[-1].status,
-            )
-
-    def get_all_models(self) -> List[OpenRouterModel]:
-        """Get all monitored free models."""
+    def get_free_model(self, model_id: str) -> Optional[OpenRouterModel]:
+        """Get a specific free model by ID."""
         with self._lock:
-            return list(self._models.values())
+            return self._free_models.get(model_id)
 
-    def get_all_model_ids(self) -> List[str]:
-        """Get all monitored model IDs."""
+    def get_paid_model(self, model_id: str) -> Optional[OpenRouterModel]:
+        """Get a specific paid model by ID."""
         with self._lock:
-            return list(self._models.keys())
+            return self._paid_models.get(model_id)
+
+    # Selected model management
+    def set_selected_free_model(self, model_id: str) -> bool:
+        """Set the selected free model. Returns True if model exists."""
+        with self._lock:
+            if model_id in self._free_models:
+                self._selected_free_model_id = model_id
+                return True
+            return False
+
+    def set_selected_paid_model(self, model_id: str) -> bool:
+        """Set the selected paid model. Returns True if model exists."""
+        with self._lock:
+            if model_id in self._paid_models:
+                self._selected_paid_model_id = model_id
+                return True
+            return False
+
+    def get_selected_free_model(self) -> Optional[OpenRouterModel]:
+        """Get the currently selected free model."""
+        with self._lock:
+            if self._selected_free_model_id:
+                return self._free_models.get(self._selected_free_model_id)
+            return None
+
+    def get_selected_paid_model(self) -> Optional[OpenRouterModel]:
+        """Get the currently selected paid model."""
+        with self._lock:
+            if self._selected_paid_model_id:
+                return self._paid_models.get(self._selected_paid_model_id)
+            return None
 
     @property
-    def last_health_check(self) -> Optional[datetime]:
-        """Get timestamp of last health check."""
+    def selected_free_model_id(self) -> Optional[str]:
+        """Get the selected free model ID."""
         with self._lock:
-            return self._last_health_check
+            return self._selected_free_model_id
+
+    @property
+    def selected_paid_model_id(self) -> Optional[str]:
+        """Get the selected paid model ID."""
+        with self._lock:
+            return self._selected_paid_model_id
 
     @property
     def last_models_fetch(self) -> Optional[datetime]:
@@ -117,25 +108,16 @@ class MemoryStore:
             return self._last_models_fetch
 
     @property
-    def model_count(self) -> int:
-        """Get count of monitored models."""
+    def free_model_count(self) -> int:
+        """Get count of free models."""
         with self._lock:
-            return len(self._models)
+            return len(self._free_models)
 
-    def remove_model(self, model_id: str) -> bool:
-        """Remove a model from tracking. Returns True if removed."""
+    @property
+    def paid_model_count(self) -> int:
+        """Get count of paid models."""
         with self._lock:
-            if model_id in self._models:
-                del self._models[model_id]
-                if model_id in self._health_history:
-                    del self._health_history[model_id]
-                return True
-            return False
-
-    def has_model(self, model_id: str) -> bool:
-        """Check if a model is being tracked."""
-        with self._lock:
-            return model_id in self._models
+            return len(self._paid_models)
 
 
 # Global singleton instance
