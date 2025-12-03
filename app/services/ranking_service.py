@@ -8,14 +8,56 @@ from app.storage.memory_store import memory_store
 
 logger = logging.getLogger(__name__)
 
+# Minimum context length for paid models (8K tokens)
+MIN_PAID_MODEL_CONTEXT = 8192
+
+# Model IDs to exclude (variable pricing, meta models, etc.)
+EXCLUDED_MODEL_PATTERNS = [
+    "openrouter/auto",
+    "/auto",
+    "router",
+]
+
 
 class RankingService:
     """
     Service for ranking and selecting models.
 
     - Free models: Ranked by context length (larger is better)
-    - Paid models: Ranked by price (cheaper is better)
+    - Paid models: Ranked by price (cheaper is better), with minimum context requirement
     """
+
+    def _is_valid_paid_model(self, model: OpenRouterModel) -> bool:
+        """
+        Check if a paid model is valid for selection.
+
+        Requirements:
+        - Has valid numeric pricing (not variable/dynamic)
+        - Has minimum context length
+        - Not an excluded model (like openrouter/auto)
+        """
+        # Check for excluded patterns
+        model_id_lower = model.id.lower()
+        for pattern in EXCLUDED_MODEL_PATTERNS:
+            if pattern.lower() in model_id_lower:
+                return False
+
+        # Check context length
+        if not model.context_length or model.context_length < MIN_PAID_MODEL_CONTEXT:
+            return False
+
+        # Check for valid numeric pricing
+        try:
+            prompt_cost = float(model.pricing.prompt)
+            completion_cost = float(model.pricing.completion)
+
+            # Exclude models with zero or negative pricing (likely variable/dynamic)
+            if prompt_cost <= 0 or completion_cost <= 0:
+                return False
+
+            return True
+        except (ValueError, TypeError):
+            return False
 
     def get_best_free_model(self) -> Optional[OpenRouterModel]:
         """
@@ -39,30 +81,34 @@ class RankingService:
     def get_cheapest_paid_model(self) -> Optional[OpenRouterModel]:
         """
         Get the cheapest paid model based on pricing.
-        Lower total cost (prompt + completion) = better.
+
+        Requirements:
+        - Fixed/numeric pricing (not variable like openrouter/auto)
+        - Minimum context length (8K tokens)
+        - Lower total cost (prompt + completion) = better
         """
         paid_models = memory_store.get_all_paid_models()
 
         if not paid_models:
             return None
 
+        # Filter to valid models only
+        valid_models = [m for m in paid_models if self._is_valid_paid_model(m)]
+
+        if not valid_models:
+            logger.warning("No valid paid models found matching criteria")
+            return None
+
         def get_total_cost(model: OpenRouterModel) -> float:
             """Calculate total cost per token (prompt + completion)."""
-            try:
-                prompt_cost = float(model.pricing.prompt)
-                completion_cost = float(model.pricing.completion)
-                return prompt_cost + completion_cost
-            except (ValueError, TypeError):
-                # If pricing can't be parsed, treat as very expensive
-                return float("inf")
+            prompt_cost = float(model.pricing.prompt)
+            completion_cost = float(model.pricing.completion)
+            return prompt_cost + completion_cost
 
         # Sort by total cost ascending (cheapest first)
-        sorted_models = sorted(paid_models, key=get_total_cost)
+        sorted_models = sorted(valid_models, key=get_total_cost)
 
-        # Filter out models with infinite cost (unparseable pricing)
-        valid_models = [m for m in sorted_models if get_total_cost(m) != float("inf")]
-
-        return valid_models[0] if valid_models else sorted_models[0]
+        return sorted_models[0]
 
     def get_ranked_free_models(self) -> List[OpenRouterModel]:
         """Get all free models ranked by context length (largest first)."""
@@ -74,8 +120,14 @@ class RankingService:
         )
 
     def get_ranked_paid_models(self) -> List[OpenRouterModel]:
-        """Get all paid models ranked by price (cheapest first)."""
+        """
+        Get all paid models ranked by price (cheapest first).
+        Only includes valid models with fixed pricing and minimum context.
+        """
         paid_models = memory_store.get_all_paid_models()
+
+        # Filter to valid models only
+        valid_models = [m for m in paid_models if self._is_valid_paid_model(m)]
 
         def get_total_cost(model: OpenRouterModel) -> float:
             try:
@@ -85,7 +137,7 @@ class RankingService:
             except (ValueError, TypeError):
                 return float("inf")
 
-        return sorted(paid_models, key=get_total_cost)
+        return sorted(valid_models, key=get_total_cost)
 
     def select_best_free_model(self) -> Optional[str]:
         """
@@ -111,8 +163,12 @@ class RankingService:
             memory_store.set_selected_paid_model(cheapest.id)
             prompt_cost = cheapest.pricing.prompt
             completion_cost = cheapest.pricing.completion
-            logger.info(f"Selected cheapest paid model: {cheapest.id} (prompt: {prompt_cost}, completion: {completion_cost})")
+            logger.info(
+                f"Selected cheapest paid model: {cheapest.id} "
+                f"(context: {cheapest.context_length}, prompt: {prompt_cost}, completion: {completion_cost})"
+            )
             return cheapest.id
+        logger.warning("No valid paid model found to select")
         return None
 
 
