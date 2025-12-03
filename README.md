@@ -1,19 +1,22 @@
 # Freeway
 
-A lightweight FastAPI service that monitors and recommends the best free OpenRouter models for your projects.
+A lightweight FastAPI service that selects the best free and cheapest paid OpenRouter models for your projects.
 
 ## Overview
 
-Freeway fetches free models from OpenRouter, performs periodic health checks, and ranks them using a weighted scoring algorithm. Other projects can query Freeway to get the best available free model at any time.
+Freeway fetches all models from OpenRouter, categorizes them as free or paid, and automatically selects:
+- **Best Free Model**: Ranked by context length (larger is better)
+- **Cheapest Paid Model**: Ranked by price (lower prompt + completion cost)
+
+Models are refreshed daily at midnight UTC. Free model selection auto-updates, paid model stays fixed.
 
 ## Features
 
 - **API Key Authentication**: All endpoints require `X-Api-Key` header
-- **Automatic Model Discovery**: Fetches all free models (`:free` suffix) from OpenRouter API
-- **Health Monitoring**: Daily health checks at configurable time (default midnight UTC)
-- **Smart Rate Limiting**: Handles 429 errors with exponential backoff (up to 3 retries)
-- **Weighted Scoring**: Ranks models by availability, speed, and context length
-- **External Reporting**: Other projects can report failing models via API
+- **Automatic Model Discovery**: Fetches and categorizes all OpenRouter models
+- **Separate Endpoints**: Dedicated endpoints for free and paid models
+- **Daily Refresh**: Scheduler updates model list at midnight UTC
+- **Full Model Details**: Returns pricing, context length, and description
 - **Docker Ready**: Includes Dockerfile and docker-compose with Traefik integration
 
 ## Authentication
@@ -21,52 +24,88 @@ Freeway fetches free models from OpenRouter, performs periodic health checks, an
 All API endpoints require authentication via the `X-Api-Key` header.
 
 ```bash
-curl -H "X-Api-Key: your-api-key" http://localhost:8000/model
+curl -H "X-Api-Key: your-api-key" http://localhost:8000/model/free
 ```
 
 Without a valid API key, requests return `401 Unauthorized`.
 
 **Note**: Swagger/OpenAPI docs are disabled in production for security.
 
-## Scoring Algorithm
-
-Models are ranked using a weighted scoring system (0-100 points):
-
-| Factor | Weight | Description |
-|--------|--------|-------------|
-| Availability | 50% | Health check success rate |
-| Speed | 30% | Response time (lower is better) |
-| Context Length | 20% | Larger context = bonus points |
-
 ## API Endpoints
 
-### GET /model
+### GET /model/free
 
-Returns the best available model based on ranking score.
+Returns the best free model (highest context length).
 
 ```json
 {
-  "model_id": "google/gemini-2.0-flash-exp:free",
-  "model_name": "Gemini 2.0 Flash Exp",
-  "context_length": 1048576,
-  "availability_score": 1.0,
-  "avg_response_time_ms": 2345.67,
-  "last_check": "2025-12-02T18:30:00Z",
-  "last_status": "success",
-  "rank": 1,
-  "score": 85.5
+  "model_id": "x-ai/grok-4.1-fast:free",
+  "model_name": "xAI: Grok 4.1 Fast (free)",
+  "description": "Grok 4.1 Fast is xAI's best agentic tool calling model...",
+  "context_length": 2000000,
+  "pricing": {
+    "prompt": "0",
+    "completion": "0"
+  }
 }
 ```
 
-### GET /models
+### GET /model/paid
 
-Returns all tracked models ranked by score.
+Returns the cheapest paid model (lowest prompt + completion cost).
 
 ```json
 {
-  "models": [...],
-  "total_count": 28,
-  "last_updated": "2025-12-02T18:30:00Z"
+  "model_id": "meta-llama/llama-3.2-3b-instruct",
+  "model_name": "Meta: Llama 3.2 3B Instruct",
+  "description": "Llama 3.2 3B is a 3-billion-parameter multilingual model...",
+  "context_length": 131072,
+  "pricing": {
+    "prompt": "0.00000002",
+    "completion": "0.00000002"
+  }
+}
+```
+
+### GET /models/free
+
+Returns all free models ranked by context length (largest first).
+
+```json
+{
+  "models": [
+    {
+      "model_id": "x-ai/grok-4.1-fast:free",
+      "model_name": "xAI: Grok 4.1 Fast (free)",
+      "context_length": 2000000,
+      "pricing": {"prompt": "0", "completion": "0"},
+      "rank": 1
+    },
+    ...
+  ],
+  "total_count": 30,
+  "last_updated": "2025-12-03T00:00:00Z"
+}
+```
+
+### GET /models/paid
+
+Returns all paid models ranked by price (cheapest first).
+
+```json
+{
+  "models": [
+    {
+      "model_id": "meta-llama/llama-3.2-3b-instruct",
+      "model_name": "Meta: Llama 3.2 3B Instruct",
+      "context_length": 131072,
+      "pricing": {"prompt": "0.00000002", "completion": "0.00000002"},
+      "rank": 1
+    },
+    ...
+  ],
+  "total_count": 305,
+  "last_updated": "2025-12-03T00:00:00Z"
 }
 ```
 
@@ -79,34 +118,13 @@ Service health check endpoint.
   "status": "healthy",
   "service": "freeway",
   "version": "1.0.0",
-  "models_monitored": 28,
-  "health_checks_enabled": true,
-  "last_check_run": "2025-12-02T18:30:00Z"
+  "free_models_count": 30,
+  "paid_models_count": 305,
+  "selected_free_model": "x-ai/grok-4.1-fast:free",
+  "selected_paid_model": "meta-llama/llama-3.2-3b-instruct",
+  "last_refresh": "2025-12-03T00:00:00Z"
 }
 ```
-
-### POST /report
-
-Report a failing model from external projects. Freeway will verify and remove it if confirmed failing.
-
-**Request:**
-```json
-{
-  "model_id": "some-model/name:free"
-}
-```
-
-**Response:**
-```json
-{
-  "model_id": "some-model/name:free",
-  "action": "removed",
-  "message": "Model failed health check and was removed",
-  "health_check_passed": false
-}
-```
-
-Possible actions: `removed`, `kept`, `not_found`
 
 ## Configuration
 
@@ -115,11 +133,7 @@ Environment variables (see `.env.example`):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_KEY` | (required) | API key for accessing Freeway endpoints |
-| `OPENROUTER_API_KEY` | (required for health checks) | Your OpenRouter API key |
-| `HEALTH_CHECK_ENABLED` | `true` | Enable/disable health checks |
-| `HEALTH_CHECK_HOUR` | `0` | Hour to run daily health check (0-23, UTC) |
-| `CHECK_DELAY_SECONDS` | `60` | Delay between each model check (seconds) |
-| `HISTORY_SIZE` | `20` | Number of health results to keep per model |
+| `OPENROUTER_API_KEY` | - | OpenRouter API key (for future use) |
 | `REQUEST_TIMEOUT_SECONDS` | `30` | Timeout for API requests |
 
 ## Quick Start
@@ -139,7 +153,7 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env and set API_KEY and OPENROUTER_API_KEY
+# Edit .env and set API_KEY
 
 # Run
 uvicorn app.main:app --reload
@@ -164,19 +178,17 @@ freeway/
 │   │   ├── auth.py             # API key authentication
 │   │   └── routes.py           # API endpoints
 │   ├── models/
-│   │   ├── health_check.py     # Health check data models
 │   │   └── openrouter.py       # OpenRouter API models
 │   ├── schemas/
 │   │   └── responses.py        # API response schemas
 │   ├── services/
-│   │   ├── health_check_service.py  # Health check orchestration
 │   │   ├── openrouter_service.py    # OpenRouter API client
-│   │   └── ranking_service.py       # Model ranking algorithm
+│   │   └── ranking_service.py       # Model ranking/selection
 │   ├── storage/
 │   │   └── memory_store.py     # In-memory data store
 │   ├── config.py               # Configuration
 │   ├── main.py                 # FastAPI application
-│   └── scheduler.py            # Background task scheduler
+│   └── scheduler.py            # Daily model refresh scheduler
 ├── Dockerfile
 ├── compose.yml
 ├── requirements.txt
@@ -195,23 +207,15 @@ FREEWAY_API_KEY = "your-freeway-api-key"
 
 headers = {"X-Api-Key": FREEWAY_API_KEY}
 
-response = httpx.get(f"{FREEWAY_URL}/model", headers=headers)
-best_model = response.json()
+# Get best free model
+response = httpx.get(f"{FREEWAY_URL}/model/free", headers=headers)
+free_model = response.json()
+print(f"Best free: {free_model['model_id']}")
 
-# Use the model ID with OpenRouter
-model_id = best_model["model_id"]  # e.g., "google/gemini-2.0-flash-exp:free"
-```
-
-Report a failing model:
-
-```python
-import httpx
-
-httpx.post(
-    f"{FREEWAY_URL}/report",
-    headers={"X-Api-Key": FREEWAY_API_KEY},
-    json={"model_id": "failing-model/name:free"}
-)
+# Get cheapest paid model
+response = httpx.get(f"{FREEWAY_URL}/model/paid", headers=headers)
+paid_model = response.json()
+print(f"Cheapest paid: {paid_model['model_id']}")
 ```
 
 ## Deployment
@@ -222,9 +226,13 @@ The included `compose.yml` is configured for Traefik reverse proxy:
 - TLS: Automatic via Let's Encrypt
 - Network: External `proxy` network (must exist)
 
-## Notes
+## How It Works
 
-- Models are identified by `:free` suffix in their ID
-- Health checks require an OpenRouter API key with credits (for higher rate limits)
-- Without API key, the service still serves the model list but without health data
-- All timestamps are in UTC
+1. **On startup**: Fetches all models from OpenRouter API
+2. **Categorization**: Splits models into free (`:free` suffix) and paid
+3. **Selection**:
+   - Free: Best = largest context length
+   - Paid: Best = lowest (prompt + completion) cost
+4. **Daily refresh**: Scheduler runs at midnight UTC to update models
+5. **Auto-update**: Free model selection updates if better model available
+6. **Fixed paid**: Paid model selection stays fixed (not auto-updated)
