@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
         run_migrations()
     except Exception as e:
         logger.error(f"Migration failed: {e}")
-        logger.warning("Continuing without migrations - database may not be ready")
+        raise  # Migrations are required - fail startup if they fail
 
     # Initialize database connection
     db_available = False

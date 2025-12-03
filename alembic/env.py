@@ -46,18 +46,22 @@ def run_migrations_online() -> None:
     connectable = create_engine(
         get_url(),
         poolclass=pool.NullPool,
+        connect_args={
+            "connect_timeout": 10,  # Connection timeout in seconds
+        },
     )
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-        )
+    try:
+        with connectable.connect() as connection:
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+            )
 
-        with context.begin_transaction():
-            context.run_migrations()
-
-    connectable.dispose()
+            with context.begin_transaction():
+                context.run_migrations()
+    finally:
+        connectable.dispose()
 
 
 if context.is_offline_mode():
