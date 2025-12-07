@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import UsageLog
@@ -81,7 +81,7 @@ class UsageRepository:
         """Get aggregated statistics for a project."""
         query = select(
             func.count(UsageLog.id).label("total_requests"),
-            func.sum(func.cast(UsageLog.success, int)).label("successful_requests"),
+            func.sum(case((UsageLog.success == True, 1), else_=0)).label("successful_requests"),
             func.sum(UsageLog.input_tokens).label("total_input_tokens"),
             func.sum(UsageLog.output_tokens).label("total_output_tokens"),
             func.sum(UsageLog.cost_usd).label("total_cost_usd"),
