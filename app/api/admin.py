@@ -27,7 +27,9 @@ from app.schemas.projects import (
     RotateKeyResponse,
     UpdateProjectRequest,
 )
+from app.schemas.responses import SetModelRequest, SetModelResponse
 from app.services.project_service import ProjectService
+from app.storage.memory_store import memory_store
 
 logger = logging.getLogger(__name__)
 
@@ -266,4 +268,81 @@ async def get_usage_logs(
             for log in logs
         ],
         total_count=len(logs),
+    )
+
+
+# ============== Model Selection ==============
+
+
+@router.put("/model/free", response_model=SetModelResponse)
+async def set_selected_free_model(
+    request: SetModelRequest,
+    _: str = Depends(require_admin_key),
+):
+    """
+    Set the selected free model.
+
+    The model must exist in the available free models list.
+    This overrides the automatic selection based on context length.
+    """
+    model = memory_store.get_free_model(request.model_id)
+
+    if not model:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Free model '{request.model_id}' not found. Check /models/free for available models.",
+        )
+
+    success = memory_store.set_selected_free_model(request.model_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to set selected free model",
+        )
+
+    logger.info(f"Admin set selected free model to: {request.model_id}")
+
+    return SetModelResponse(
+        success=True,
+        model_id=model.id,
+        model_name=model.name,
+        message=f"Selected free model set to '{model.name}'",
+    )
+
+
+@router.put("/model/paid", response_model=SetModelResponse)
+async def set_selected_paid_model(
+    request: SetModelRequest,
+    _: str = Depends(require_admin_key),
+):
+    """
+    Set the selected paid model.
+
+    The model must exist in the available paid models list.
+    This overrides the automatic selection based on price.
+    """
+    model = memory_store.get_paid_model(request.model_id)
+
+    if not model:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Paid model '{request.model_id}' not found. Check /models/paid for available models.",
+        )
+
+    success = memory_store.set_selected_paid_model(request.model_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to set selected paid model",
+        )
+
+    logger.info(f"Admin set selected paid model to: {request.model_id}")
+
+    return SetModelResponse(
+        success=True,
+        model_id=model.id,
+        model_name=model.name,
+        message=f"Selected paid model set to '{model.name}'",
     )

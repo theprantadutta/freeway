@@ -53,3 +53,18 @@ class HealthResponse(BaseModel):
     selected_free_model: Optional[str] = None
     selected_paid_model: Optional[str] = None
     last_refresh: Optional[datetime] = None
+
+
+class SetModelRequest(BaseModel):
+    """Request to set a selected model."""
+
+    model_id: str
+
+
+class SetModelResponse(BaseModel):
+    """Response after setting a selected model."""
+
+    success: bool
+    model_id: str
+    model_name: str
+    message: str
