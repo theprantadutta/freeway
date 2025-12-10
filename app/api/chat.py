@@ -133,6 +133,24 @@ async def create_chat_completion(
         except (ValueError, TypeError):
             pass
 
+        # Extract response content and finish reason
+        response_content: Optional[str] = None
+        finish_reason: Optional[str] = None
+        if response_data.get("choices"):
+            first_choice = response_data["choices"][0]
+            response_content = first_choice.get("message", {}).get("content")
+            finish_reason = first_choice.get("finish_reason")
+
+        # Build request params for logging
+        request_params = {
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+            "top_p": request.top_p,
+            "frequency_penalty": request.frequency_penalty,
+            "presence_penalty": request.presence_penalty,
+            "stop": request.stop,
+        }
+
         # Log usage in background
         background_tasks.add_task(
             usage_service.log_usage,
@@ -147,6 +165,11 @@ async def create_chat_completion(
             completion_cost_per_token=completion_cost,
             success=True,
             request_id=request_id,
+            provider="openrouter",
+            request_messages=messages,
+            response_content=response_content,
+            finish_reason=finish_reason,
+            request_params=request_params,
         )
 
         # Build response
@@ -182,6 +205,16 @@ async def create_chat_completion(
         error_message = str(e)[:500]
         logger.error(f"Chat completion failed: {error_message}")
 
+        # Build request params for error logging
+        request_params = {
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+            "top_p": request.top_p,
+            "frequency_penalty": request.frequency_penalty,
+            "presence_penalty": request.presence_penalty,
+            "stop": request.stop,
+        }
+
         # Log failed request in background
         background_tasks.add_task(
             usage_service.log_usage,
@@ -195,6 +228,9 @@ async def create_chat_completion(
             success=False,
             error_message=error_message,
             request_id=request_id,
+            provider="openrouter",
+            request_messages=messages,
+            request_params=request_params,
         )
 
         raise HTTPException(

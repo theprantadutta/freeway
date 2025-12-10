@@ -57,6 +57,11 @@ class UsageService:
         success: bool = True,
         error_message: Optional[str] = None,
         request_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        request_messages: Optional[list] = None,
+        response_content: Optional[str] = None,
+        finish_reason: Optional[str] = None,
+        request_params: Optional[dict] = None,
     ) -> None:
         """
         Log a usage entry to the database.
@@ -79,6 +84,11 @@ class UsageService:
                     success=success,
                     error_message=error_message,
                     request_id=request_id,
+                    provider=provider,
+                    request_messages=request_messages,
+                    response_content=response_content,
+                    finish_reason=finish_reason,
+                    request_params=request_params,
                 )
                 logger.debug(f"Logged usage for project {project_id}: {model_id}, {input_tokens + output_tokens} tokens")
         except Exception as e:

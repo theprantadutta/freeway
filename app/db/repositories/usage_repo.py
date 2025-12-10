@@ -31,6 +31,11 @@ class UsageRepository:
         success: bool = True,
         error_message: Optional[str] = None,
         request_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        request_messages: Optional[list] = None,
+        response_content: Optional[str] = None,
+        finish_reason: Optional[str] = None,
+        request_params: Optional[dict] = None,
     ) -> UsageLog:
         """Create a new usage log entry."""
         log = UsageLog(
@@ -46,6 +51,11 @@ class UsageRepository:
             success=success,
             error_message=error_message,
             request_id=request_id,
+            provider=provider,
+            request_messages=request_messages,
+            response_content=response_content,
+            finish_reason=finish_reason,
+            request_params=request_params,
         )
         self.session.add(log)
         await self.session.commit()

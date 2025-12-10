@@ -108,6 +108,13 @@ class UsageLog(Base):
         nullable=False,
     )
 
+    # Extended fields for full request/response logging
+    provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    request_messages: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    response_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    finish_reason: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    request_params: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
     # Relationships
     project: Mapped["Project"] = relationship("Project", back_populates="usage_logs")
 
