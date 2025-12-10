@@ -9,7 +9,7 @@ from sqlalchemy import Boolean, DateTime, Index, Integer, Numeric, String, Text,
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.connection import Base
+from app.db.base import Base
 
 
 def utc_now() -> datetime:

@@ -6,7 +6,11 @@ from sqlalchemy import create_engine, pool, text
 from alembic import context
 
 from app.config import settings
-from app.models.database import Base
+from app.db.base import Base
+
+# Import models to register them with Base.metadata (for autogenerate)
+# This import is safe because database.py only imports Base from base.py
+from app.models import database  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

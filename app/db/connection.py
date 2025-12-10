@@ -4,17 +4,11 @@ import logging
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
+from app.db.base import Base  # noqa: F401 - re-export for backwards compatibility
 
 logger = logging.getLogger(__name__)
-
-
-class Base(DeclarativeBase):
-    """Base class for SQLAlchemy models."""
-
-    pass
 
 
 # Create async engine
