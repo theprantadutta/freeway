@@ -1,6 +1,7 @@
 """Database migrations utility."""
 
 import logging
+import time
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -10,6 +11,9 @@ from sqlalchemy import create_engine, inspect, text
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 30
+RETRY_DELAY = 2  # seconds
 
 
 def get_sync_url():
@@ -57,8 +61,38 @@ def tables_exist():
         engine.dispose()
 
 
+def wait_for_db():
+    """Wait for database to be fully ready."""
+    logger.info("Waiting for database to be ready...")
+    engine = create_engine(
+        get_sync_url(),
+        connect_args={"connect_timeout": 5},
+    )
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            with engine.connect() as conn:
+                # Simple query to verify DB is fully operational
+                conn.execute(text("SELECT 1"))
+                conn.commit()
+            logger.info(f"Database is ready (attempt {attempt})")
+            engine.dispose()
+            return True
+        except Exception as e:
+            logger.warning(f"Database not ready (attempt {attempt}/{MAX_RETRIES}): {e}")
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY)
+        finally:
+            engine.dispose()
+
+    raise RuntimeError(f"Database not ready after {MAX_RETRIES} attempts")
+
+
 def run_migrations():
     """Run alembic migrations to head."""
+    # Wait for database to be fully ready first
+    wait_for_db()
+
     logger.info("Checking database migrations...")
 
     try:
