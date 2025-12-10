@@ -53,6 +53,7 @@ def run_migrations_online() -> None:
         connect_args={
             "connect_timeout": 30,
         },
+        isolation_level="AUTOCOMMIT",
     )
 
     try:
@@ -60,10 +61,8 @@ def run_migrations_online() -> None:
             context.configure(
                 connection=connection,
                 target_metadata=target_metadata,
-                transaction_per_migration=True,
             )
-            with context.begin_transaction():
-                context.run_migrations()
+            context.run_migrations()
     finally:
         connectable.dispose()
 
