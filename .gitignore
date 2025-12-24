@@ -9,6 +9,7 @@ obj/
 
 # IDE
 .idea/
+.claude/
 .vs/
 *.sln.docstates
 riderModule.iml
