@@ -3,6 +3,7 @@ using Freeway.Application.DTOs;
 using Freeway.Domain.Entities;
 using Freeway.Domain.Interfaces;
 using MediatR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Freeway.Application.Features.Chat.Commands;
@@ -11,20 +12,20 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
 {
     private readonly IOpenRouterService _openRouterService;
     private readonly IModelCacheService _modelCacheService;
-    private readonly IAppDbContext _context;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDateTimeService _dateTimeService;
     private readonly ILogger<CreateChatCompletionCommandHandler> _logger;
 
     public CreateChatCompletionCommandHandler(
         IOpenRouterService openRouterService,
         IModelCacheService modelCacheService,
-        IAppDbContext context,
+        IServiceScopeFactory scopeFactory,
         IDateTimeService dateTimeService,
         ILogger<CreateChatCompletionCommandHandler> logger)
     {
         _openRouterService = openRouterService;
         _modelCacheService = modelCacheService;
-        _context = context;
+        _scopeFactory = scopeFactory;
         _dateTimeService = dateTimeService;
         _logger = logger;
     }
@@ -61,8 +62,8 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         // Call OpenRouter
         var result = await _openRouterService.CreateChatCompletionAsync(modelId, messages, options, cancellationToken);
 
-        // Log usage (awaited to avoid disposed context issues)
-        await LogUsageAsync(request, modelId, modelType, model, result);
+        // Log usage in background (fire-and-forget with its own scope)
+        _ = Task.Run(() => LogUsageInBackgroundAsync(request, modelId, modelType, model, result));
 
         if (!result.Success)
         {
@@ -120,7 +121,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         return (requestedModel, "unknown", null);
     }
 
-    private async Task LogUsageAsync(
+    private async Task LogUsageInBackgroundAsync(
         CreateChatCompletionCommand request,
         string modelId,
         string modelType,
@@ -129,6 +130,11 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
     {
         try
         {
+            // Create a new scope so we have our own DbContext instance
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+            var dateTimeService = scope.ServiceProvider.GetRequiredService<IDateTimeService>();
+
             decimal promptCost = 0;
             decimal completionCost = 0;
             decimal totalCost = 0;
@@ -155,7 +161,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
                 Success = result.Success,
                 ErrorMessage = result.ErrorMessage,
                 RequestId = result.Id,
-                CreatedAt = _dateTimeService.UtcNow,
+                CreatedAt = dateTimeService.UtcNow,
                 Provider = "openrouter",
                 RequestMessages = request.Messages.Select(m => new ChatMessage
                 {
@@ -171,8 +177,10 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
                 }
             };
 
-            _context.UsageLogs.Add(usageLog);
-            await _context.SaveChangesAsync();
+            context.UsageLogs.Add(usageLog);
+            await context.SaveChangesAsync();
+
+            _logger.LogDebug("Usage logged for project {ProjectId}, model {ModelId}", request.ProjectId, modelId);
         }
         catch (Exception ex)
         {
