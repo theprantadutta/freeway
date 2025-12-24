@@ -10,8 +10,36 @@ using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Events;
 
-// Load .env file
-Env.Load();
+// Load .env file (search in current dir, then parent directories)
+var envPath = FindEnvFile();
+if (!string.IsNullOrEmpty(envPath))
+{
+    Env.Load(envPath);
+}
+
+static string? FindEnvFile()
+{
+    var currentDir = Directory.GetCurrentDirectory();
+
+    // Check current directory
+    var envFile = Path.Combine(currentDir, ".env");
+    if (File.Exists(envFile)) return envFile;
+
+    // Check parent directories (for when running from src/Freeway.Api)
+    var dir = new DirectoryInfo(currentDir);
+    while (dir.Parent != null)
+    {
+        dir = dir.Parent;
+        envFile = Path.Combine(dir.FullName, ".env");
+        if (File.Exists(envFile)) return envFile;
+
+        // Stop at solution directory (contains .sln file)
+        if (Directory.GetFiles(dir.FullName, "*.sln").Length > 0)
+            break;
+    }
+
+    return null;
+}
 
 // Configure Serilog
 Log.Logger = new LoggerConfiguration()

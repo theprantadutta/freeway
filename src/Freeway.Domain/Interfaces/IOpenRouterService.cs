@@ -20,7 +20,7 @@ public class OpenRouterModel
     public int? ContextLength { get; set; }
     public OpenRouterPricing Pricing { get; set; } = new();
     public OpenRouterArchitecture? Architecture { get; set; }
-    public DateTime? Created { get; set; }
+    public long? Created { get; set; }
 }
 
 public class OpenRouterPricing
