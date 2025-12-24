@@ -160,6 +160,11 @@ try
         service => service.RefreshProjectCacheAsync(),
         Cron.Daily(1, 0)); // Daily at 1 AM UTC
 
+    RecurringJob.AddOrUpdate<Freeway.Infrastructure.Jobs.IProviderBenchmarkJob>(
+        "benchmark-providers",
+        job => job.RunBenchmarkAsync(),
+        "0 */6 * * *"); // Every 6 hours
+
     app.MapControllers();
 
     Log.Information("Freeway API started successfully");

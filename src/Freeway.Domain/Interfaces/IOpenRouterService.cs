@@ -60,6 +60,8 @@ public class ChatCompletionResult
     public bool Success { get; set; } = true;
     public string? ErrorMessage { get; set; }
     public int ResponseTimeMs { get; set; }
+    public int? HttpStatusCode { get; set; }
+    public string? ProviderName { get; set; }
 }
 
 public class ChatCompletionChoice

@@ -11,6 +11,7 @@ namespace Freeway.Application.Features.Chat.Commands;
 public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatCompletionCommand, Result<ChatCompletionResponseDto>>
 {
     private readonly IOpenRouterService _openRouterService;
+    private readonly IProviderOrchestrator _providerOrchestrator;
     private readonly IModelCacheService _modelCacheService;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDateTimeService _dateTimeService;
@@ -18,12 +19,14 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
 
     public CreateChatCompletionCommandHandler(
         IOpenRouterService openRouterService,
+        IProviderOrchestrator providerOrchestrator,
         IModelCacheService modelCacheService,
         IServiceScopeFactory scopeFactory,
         IDateTimeService dateTimeService,
         ILogger<CreateChatCompletionCommandHandler> logger)
     {
         _openRouterService = openRouterService;
+        _providerOrchestrator = providerOrchestrator;
         _modelCacheService = modelCacheService;
         _scopeFactory = scopeFactory;
         _dateTimeService = dateTimeService;
@@ -32,14 +35,6 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
 
     public async Task<Result<ChatCompletionResponseDto>> Handle(CreateChatCompletionCommand request, CancellationToken cancellationToken)
     {
-        // Resolve model
-        var (modelId, modelType, model) = ResolveModel(request.Model);
-
-        if (modelId == null)
-        {
-            return Result<ChatCompletionResponseDto>.ServiceUnavailable($"Model '{request.Model}' not available");
-        }
-
         // Convert messages
         var messages = request.Messages.Select(m => new ChatMessage
         {
@@ -59,15 +54,42 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             Stream = request.Stream
         };
 
-        // Call OpenRouter
-        var result = await _openRouterService.CreateChatCompletionAsync(modelId, messages, options, cancellationToken);
+        ChatCompletionResult result;
+        string modelId;
+        string modelType;
+        CachedModel? model = null;
+
+        // Use orchestrator for "free" requests, direct OpenRouter for "paid" or specific models
+        if (request.Model.Equals("free", StringComparison.OrdinalIgnoreCase))
+        {
+            // Use multi-provider orchestrator with smart fallback
+            result = await _providerOrchestrator.ExecuteWithFallbackAsync(messages, options, cancellationToken);
+            modelId = result.Model;
+            modelType = "free";
+        }
+        else
+        {
+            // Resolve model for paid or specific model requests
+            var resolved = ResolveModel(request.Model);
+            modelId = resolved.modelId!;
+            modelType = resolved.modelType;
+            model = resolved.model;
+
+            if (modelId == null)
+            {
+                return Result<ChatCompletionResponseDto>.ServiceUnavailable($"Model '{request.Model}' not available");
+            }
+
+            // Call OpenRouter directly
+            result = await _openRouterService.CreateChatCompletionAsync(modelId, messages, options, cancellationToken);
+        }
 
         // Log usage in background (fire-and-forget with its own scope)
         _ = Task.Run(() => LogUsageInBackgroundAsync(request, modelId, modelType, model, result));
 
         if (!result.Success)
         {
-            return Result<ChatCompletionResponseDto>.BadGateway(result.ErrorMessage ?? "OpenRouter API error");
+            return Result<ChatCompletionResponseDto>.BadGateway(result.ErrorMessage ?? "API error");
         }
 
         return Result<ChatCompletionResponseDto>.Success(new ChatCompletionResponseDto
@@ -162,7 +184,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
                 ErrorMessage = result.ErrorMessage,
                 RequestId = result.Id,
                 CreatedAt = dateTimeService.UtcNow,
-                Provider = "openrouter",
+                Provider = result.ProviderName ?? "openrouter",
                 RequestMessages = request.Messages.Select(m => new ChatMessage
                 {
                     Role = m.Role,

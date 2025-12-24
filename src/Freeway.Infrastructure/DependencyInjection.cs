@@ -1,6 +1,7 @@
 using Freeway.Domain.Interfaces;
 using Freeway.Infrastructure.Jobs;
 using Freeway.Infrastructure.Persistence;
+using Freeway.Infrastructure.Providers;
 using Freeway.Infrastructure.Services;
 using Hangfire;
 using Hangfire.PostgreSql;
@@ -35,17 +36,50 @@ public static class DependencyInjection
         // Register IAppDbContext
         services.AddScoped<IAppDbContext>(provider => provider.GetRequiredService<AppDbContext>());
 
-        // Add HttpClient for OpenRouter
+        // Add HttpClient for OpenRouter (legacy service)
         services.AddHttpClient<IOpenRouterService, OpenRouterService>();
+
+        // Register AI Providers with HttpClient
+        services.AddHttpClient<GeminiProvider>();
+        services.AddHttpClient<GroqProvider>();
+        services.AddHttpClient<CohereProvider>();
+        services.AddHttpClient<HuggingFaceProvider>();
+        services.AddHttpClient<MistralProvider>();
+        services.AddHttpClient<OpenRouterProvider>();
+
+        // Register all providers as IAiProvider
+        services.AddSingleton<IAiProvider>(sp =>
+            ActivatorUtilities.CreateInstance<GeminiProvider>(sp,
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(GeminiProvider))));
+        services.AddSingleton<IAiProvider>(sp =>
+            ActivatorUtilities.CreateInstance<GroqProvider>(sp,
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(GroqProvider))));
+        services.AddSingleton<IAiProvider>(sp =>
+            ActivatorUtilities.CreateInstance<CohereProvider>(sp,
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(CohereProvider))));
+        services.AddSingleton<IAiProvider>(sp =>
+            ActivatorUtilities.CreateInstance<HuggingFaceProvider>(sp,
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(HuggingFaceProvider))));
+        services.AddSingleton<IAiProvider>(sp =>
+            ActivatorUtilities.CreateInstance<MistralProvider>(sp,
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(MistralProvider))));
+        services.AddSingleton<IAiProvider>(sp =>
+            ActivatorUtilities.CreateInstance<OpenRouterProvider>(sp,
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(OpenRouterProvider))));
 
         // Register services
         services.AddSingleton<IDateTimeService, DateTimeService>();
         services.AddSingleton<IApiKeyService, ApiKeyService>();
         services.AddSingleton<IModelCacheService, ModelCacheService>();
         services.AddSingleton<IProjectCacheService, ProjectCacheService>();
+        services.AddSingleton<IProviderBenchmarkCache, ProviderBenchmarkCache>();
 
-        // Register background job service
+        // Register orchestrator
+        services.AddScoped<IProviderOrchestrator, ProviderOrchestrator>();
+
+        // Register background job services
         services.AddScoped<IBackgroundJobService, BackgroundJobService>();
+        services.AddScoped<IProviderBenchmarkJob, ProviderBenchmarkJob>();
 
         // Configure Hangfire
         services.AddHangfire(config =>
