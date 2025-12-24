@@ -1,0 +1,6 @@
+@freeway_HostAddress = http://localhost:5031
+
+GET {{freeway_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

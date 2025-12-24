@@ -1,0 +1,7 @@
+﻿services:
+  freeway:
+    image: freeway
+    build:
+      context: .
+      dockerfile: Dockerfile
+

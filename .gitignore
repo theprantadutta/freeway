@@ -1,0 +1,28 @@
+# Build outputs
+bin/
+obj/
+/packages/
+*.user
+*.userosscache
+*.suo
+*.cache
+
+# IDE
+.idea/
+.vs/
+*.sln.docstates
+riderModule.iml
+/_ReSharper.Caches/
+
+# Environment
+.env
+*.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
