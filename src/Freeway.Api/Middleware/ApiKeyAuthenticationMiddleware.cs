@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Freeway.Domain.Interfaces;
+using Microsoft.Extensions.Hosting;
 
 namespace Freeway.Api.Middleware;
 
@@ -14,11 +15,15 @@ public class ApiKeyAuthenticationMiddleware
         _adminApiKey = Environment.GetEnvironmentVariable("ADMIN_API_KEY") ?? "";
     }
 
-    // Paths that don't require authentication
-    private static readonly string[] PublicPaths = new[]
+    // Paths that never require authentication
+    private static readonly string[] PublicPathPrefixes = new[]
     {
-        "/health",
-        "/",
+        "/health"
+    };
+
+    // Paths that are public only in development
+    private static readonly string[] DevOnlyPathPrefixes = new[]
+    {
         "/openapi",
         "/scalar"
     };
@@ -27,8 +32,24 @@ public class ApiKeyAuthenticationMiddleware
     {
         var path = context.Request.Path.Value?.ToLowerInvariant() ?? "";
 
-        // Skip authentication for public paths
-        if (PublicPaths.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+        // Skip authentication for root path (exact match)
+        if (path == "/" || path == "")
+        {
+            await _next(context);
+            return;
+        }
+
+        // Skip authentication for public path prefixes
+        if (PublicPathPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+        {
+            await _next(context);
+            return;
+        }
+
+        // Skip authentication for dev-only paths in development
+        var env = context.RequestServices.GetService<IWebHostEnvironment>();
+        if (env?.IsDevelopment() == true &&
+            DevOnlyPathPrefixes.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
         {
             await _next(context);
             return;
