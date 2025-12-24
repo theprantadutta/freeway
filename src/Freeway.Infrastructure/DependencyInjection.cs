@@ -1,5 +1,6 @@
 using Freeway.Domain.Interfaces;
 using Freeway.Infrastructure.Persistence;
+using Freeway.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,6 +31,15 @@ public static class DependencyInjection
 
         // Register IAppDbContext
         services.AddScoped<IAppDbContext>(provider => provider.GetRequiredService<AppDbContext>());
+
+        // Add HttpClient for OpenRouter
+        services.AddHttpClient<IOpenRouterService, OpenRouterService>();
+
+        // Register services
+        services.AddSingleton<IDateTimeService, DateTimeService>();
+        services.AddSingleton<IApiKeyService, ApiKeyService>();
+        services.AddSingleton<IModelCacheService, ModelCacheService>();
+        services.AddSingleton<IProjectCacheService, ProjectCacheService>();
 
         return services;
     }
