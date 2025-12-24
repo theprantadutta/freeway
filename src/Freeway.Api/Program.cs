@@ -130,6 +130,13 @@ try
     }
 
     app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
+
+    // Serilog request logging
+    app.UseSerilogRequestLogging(options =>
+    {
+        options.MessageTemplate = "{RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
+    });
+
     app.UseCors();
     app.UseMiddleware<ApiKeyAuthenticationMiddleware>();
 
