@@ -35,7 +35,7 @@ public class OpenRouterArchitecture
 {
     public string? Modality { get; set; }
     public string? Tokenizer { get; set; }
-    public int? InstructType { get; set; }
+    public string? InstructType { get; set; }
 }
 
 public class ChatCompletionOptions
