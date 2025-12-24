@@ -14,8 +14,26 @@ public class ApiKeyAuthenticationMiddleware
         _adminApiKey = Environment.GetEnvironmentVariable("ADMIN_API_KEY") ?? "";
     }
 
+    // Paths that don't require authentication
+    private static readonly string[] PublicPaths = new[]
+    {
+        "/health",
+        "/",
+        "/openapi",
+        "/scalar"
+    };
+
     public async Task InvokeAsync(HttpContext context, IProjectCacheService projectCacheService)
     {
+        var path = context.Request.Path.Value?.ToLowerInvariant() ?? "";
+
+        // Skip authentication for public paths
+        if (PublicPaths.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+        {
+            await _next(context);
+            return;
+        }
+
         var apiKey = context.Request.Headers["X-Api-Key"].FirstOrDefault();
 
         if (string.IsNullOrEmpty(apiKey))
