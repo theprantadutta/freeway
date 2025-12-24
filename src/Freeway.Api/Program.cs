@@ -92,6 +92,7 @@ try
         app.MapScalarApiReference();
     }
 
+    app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
     app.UseCors();
     app.UseMiddleware<ApiKeyAuthenticationMiddleware>();
 
