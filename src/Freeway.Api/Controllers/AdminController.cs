@@ -4,6 +4,7 @@ using Freeway.Application.Features.Analytics.Queries;
 using Freeway.Application.Features.Models.Commands;
 using Freeway.Application.Features.Projects.Commands;
 using Freeway.Application.Features.Projects.Queries;
+using Freeway.Domain.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Freeway.Api.Controllers;
@@ -71,6 +72,13 @@ public class AdminController : BaseApiController
     }
 
     #endregion
+
+    [HttpPost("projects/refresh-cache")]
+    public async Task<ActionResult> RefreshProjectCache([FromServices] IProjectCacheService projectCacheService)
+    {
+        await projectCacheService.LoadCacheAsync();
+        return Ok(new { message = "Project cache refreshed successfully" });
+    }
 
     #region Model Selection
 
