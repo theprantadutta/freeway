@@ -61,8 +61,8 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         // Call OpenRouter
         var result = await _openRouterService.CreateChatCompletionAsync(modelId, messages, options, cancellationToken);
 
-        // Log usage asynchronously (fire and forget)
-        _ = LogUsageAsync(request, modelId, modelType, model, result);
+        // Log usage (awaited to avoid disposed context issues)
+        await LogUsageAsync(request, modelId, modelType, model, result);
 
         if (!result.Success)
         {
