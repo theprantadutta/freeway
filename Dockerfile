@@ -9,14 +9,14 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
 # Copy solution and project files
-COPY ["Freeway.sln", "./"]
+COPY ["freeway.sln", "./"]
 COPY ["src/Freeway.Domain/Freeway.Domain.csproj", "src/Freeway.Domain/"]
 COPY ["src/Freeway.Application/Freeway.Application.csproj", "src/Freeway.Application/"]
 COPY ["src/Freeway.Infrastructure/Freeway.Infrastructure.csproj", "src/Freeway.Infrastructure/"]
 COPY ["src/Freeway.Api/Freeway.Api.csproj", "src/Freeway.Api/"]
 
 # Restore dependencies
-RUN dotnet restore "Freeway.sln"
+RUN dotnet restore "freeway.sln"
 
 # Copy all source code
 COPY . .
