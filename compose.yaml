@@ -1,7 +1,30 @@
-﻿services:
+services:
   freeway:
     image: freeway
+    container_name: freeway-api
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.freeway.rule=Host(`freeway.pranta.dev`)"
+      - "traefik.http.routers.freeway.entrypoints=websecure"
+      - "traefik.http.routers.freeway.tls.certresolver=letsencrypt"
+      - "traefik.http.services.freeway.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
+networks:
+  proxy:
+    external: true
