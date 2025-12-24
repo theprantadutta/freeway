@@ -34,7 +34,7 @@ WORKDIR /app
 COPY --from=publish /app/publish .
 
 # Set environment variables
-ENV ASPNETCORE_URLS=http://+:8080
+ENV PORT=8080
 ENV ASPNETCORE_ENVIRONMENT=Production
 
 ENTRYPOINT ["dotnet", "Freeway.Api.dll"]
