@@ -1,6 +1,9 @@
 using Freeway.Domain.Interfaces;
+using Freeway.Infrastructure.Jobs;
 using Freeway.Infrastructure.Persistence;
 using Freeway.Infrastructure.Services;
+using Hangfire;
+using Hangfire.PostgreSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,6 +43,28 @@ public static class DependencyInjection
         services.AddSingleton<IApiKeyService, ApiKeyService>();
         services.AddSingleton<IModelCacheService, ModelCacheService>();
         services.AddSingleton<IProjectCacheService, ProjectCacheService>();
+
+        // Register background job service
+        services.AddScoped<IBackgroundJobService, BackgroundJobService>();
+
+        // Configure Hangfire
+        services.AddHangfire(config =>
+        {
+            config.SetDataCompatibilityLevel(CompatibilityLevel.Version_180);
+            config.UseSimpleAssemblyNameTypeSerializer();
+            config.UseRecommendedSerializerSettings();
+            config.UsePostgreSqlStorage(options =>
+            {
+                options.UseNpgsqlConnection(connectionString);
+            }, new PostgreSqlStorageOptions
+            {
+                SchemaName = configuration["Hangfire:SchemaName"] ?? "freeway_hangfire",
+                QueuePollInterval = TimeSpan.FromSeconds(15),
+                PrepareSchemaIfNecessary = true
+            });
+        });
+
+        services.AddHangfireServer();
 
         return services;
     }
