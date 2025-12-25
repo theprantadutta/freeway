@@ -13,6 +13,13 @@ public class GeminiProvider : BaseAiProvider, IModelFetcher
     public bool CanFetch => IsEnabled;
     private readonly string _apiKey;
 
+    // Gemini API uses camelCase, not snake_case
+    private static readonly JsonSerializerOptions GeminiJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
+
     public override string Name => "gemini";
     public override string DisplayName => "Google Gemini";
     public override bool IsFreeProvider => true;
@@ -172,7 +179,7 @@ public class GeminiProvider : BaseAiProvider, IModelFetcher
             }
 
             var content = await response.Content.ReadAsStringAsync(cts.Token);
-            var modelsResponse = JsonSerializer.Deserialize<GeminiModelsListResponse>(content, JsonOptions);
+            var modelsResponse = JsonSerializer.Deserialize<GeminiModelsListResponse>(content, GeminiJsonOptions);
 
             var models = modelsResponse?.Models?
                 .Where(m => m.SupportedGenerationMethods?.Contains("generateContent") == true)
