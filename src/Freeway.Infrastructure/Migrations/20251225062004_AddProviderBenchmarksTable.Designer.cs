@@ -14,7 +14,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Freeway.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20251224111410_AddProviderBenchmarksTable")]
+    [Migration("20251225062004_AddProviderBenchmarksTable")]
     partial class AddProviderBenchmarksTable
     {
         /// <inheritdoc />
