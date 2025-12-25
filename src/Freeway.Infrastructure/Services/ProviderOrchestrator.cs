@@ -8,6 +8,7 @@ public class ProviderOrchestrator : IProviderOrchestrator
 {
     private readonly IEnumerable<IAiProvider> _providers;
     private readonly IProviderBenchmarkCache _benchmarkCache;
+    private readonly IProviderModelCache _providerModelCache;
     private readonly ILogger<ProviderOrchestrator> _logger;
 
     // Retry configuration
@@ -17,10 +18,12 @@ public class ProviderOrchestrator : IProviderOrchestrator
     public ProviderOrchestrator(
         IEnumerable<IAiProvider> providers,
         IProviderBenchmarkCache benchmarkCache,
+        IProviderModelCache providerModelCache,
         ILogger<ProviderOrchestrator> logger)
     {
         _providers = providers;
         _benchmarkCache = benchmarkCache;
+        _providerModelCache = providerModelCache;
         _logger = logger;
     }
 
@@ -48,11 +51,20 @@ public class ProviderOrchestrator : IProviderOrchestrator
             if (!provider.IsFreeProvider)
                 continue; // Skip paid providers in this loop
 
-            var result = await TryProviderWithRetryAsync(provider, messages, options, cancellationToken);
+            // Get best model from cache, fallback to provider default if cache empty
+            var modelId = _providerModelCache.GetBestModelId(providerName);
+            if (string.IsNullOrEmpty(modelId))
+            {
+                _logger.LogWarning("No models cached for {Provider}, skipping", providerName);
+                continue;
+            }
+
+            _logger.LogDebug("Using model {Model} for {Provider}", modelId, providerName);
+            var result = await TryProviderWithRetryAsync(provider, modelId, messages, options, cancellationToken);
 
             if (result.Success)
             {
-                _logger.LogInformation("Request succeeded with {Provider}", providerName);
+                _logger.LogInformation("Request succeeded with {Provider} using model {Model}", providerName, modelId);
                 _benchmarkCache.AddBenchmarkResult(providerName, result.ResponseTimeMs, true);
                 return result;
             }
@@ -64,17 +76,25 @@ public class ProviderOrchestrator : IProviderOrchestrator
         // All free providers failed, try OpenRouter as paid fallback
         if (providersDict.TryGetValue("openrouter", out var openRouterProvider) && openRouterProvider.IsEnabled)
         {
-            _logger.LogWarning("All free providers failed, falling back to OpenRouter paid");
-
-            var result = await TryProviderWithRetryAsync(openRouterProvider, messages, options, cancellationToken);
-
-            if (result.Success)
+            var openRouterModelId = _providerModelCache.GetBestModelId("openrouter");
+            if (!string.IsNullOrEmpty(openRouterModelId))
             {
-                _logger.LogInformation("Request succeeded with OpenRouter (paid fallback)");
-                return result;
-            }
+                _logger.LogWarning("All free providers failed, falling back to OpenRouter paid with model {Model}", openRouterModelId);
 
-            errors.Add($"{openRouterProvider.DisplayName}: {result.ErrorMessage}");
+                var result = await TryProviderWithRetryAsync(openRouterProvider, openRouterModelId, messages, options, cancellationToken);
+
+                if (result.Success)
+                {
+                    _logger.LogInformation("Request succeeded with OpenRouter (paid fallback) using model {Model}", openRouterModelId);
+                    return result;
+                }
+
+                errors.Add($"{openRouterProvider.DisplayName}: {result.ErrorMessage}");
+            }
+            else
+            {
+                _logger.LogWarning("OpenRouter has no cached models, cannot fallback");
+            }
         }
 
         // All providers failed
@@ -91,6 +111,7 @@ public class ProviderOrchestrator : IProviderOrchestrator
 
     private async Task<ChatCompletionResult> TryProviderWithRetryAsync(
         IAiProvider provider,
+        string modelId,
         List<ChatMessage> messages,
         ChatCompletionOptions? options,
         CancellationToken cancellationToken)
@@ -108,7 +129,7 @@ public class ProviderOrchestrator : IProviderOrchestrator
             }
 
             lastResult = await provider.CreateChatCompletionAsync(
-                provider.DefaultModelId,
+                modelId,
                 messages,
                 options,
                 cancellationToken);

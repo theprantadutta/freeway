@@ -120,6 +120,14 @@ public class ModelValidationJob : IModelValidationJob
             _logger.LogInformation("{Provider}: Validated {Count} models in {Time}ms",
                 fetcher.ProviderName, changes.TotalCount, result.ResponseTimeMs);
 
+            // Log the best model selected for this provider
+            var bestModel = _providerModelCache.GetBestModel(fetcher.ProviderName);
+            if (bestModel != null)
+            {
+                _logger.LogInformation("{Provider}: Best model selected: {Model} (context: {Context})",
+                    fetcher.ProviderName, bestModel.Id, bestModel.ContextLength ?? 0);
+            }
+
             return (fetcher.ProviderName, true, changes.TotalCount, null);
         }
         catch (Exception ex)

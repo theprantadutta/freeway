@@ -55,6 +55,20 @@ public interface IProviderModelCache
     /// </summary>
     /// <returns>Summary of providers and model counts</returns>
     ProviderModelCacheSummary GetCacheSummary();
+
+    /// <summary>
+    /// Gets the best available chat model for a provider based on cached model data
+    /// </summary>
+    /// <param name="providerName">The provider name</param>
+    /// <returns>The best model info, or null if no models available</returns>
+    ProviderModelInfo? GetBestModel(string providerName);
+
+    /// <summary>
+    /// Gets the best model ID for a provider (convenience method)
+    /// </summary>
+    /// <param name="providerName">The provider name</param>
+    /// <returns>The best model ID, or null if no models available</returns>
+    string? GetBestModelId(string providerName);
 }
 
 /// <summary>
