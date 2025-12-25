@@ -16,6 +16,7 @@ public class ProviderBenchmarkCache : IProviderBenchmarkCache
     [
         "gemini",
         "groq",
+        "openai",
         "mistral",
         "cohere",
         "huggingface"

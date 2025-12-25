@@ -7,8 +7,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Freeway.Infrastructure.Providers;
 
-public class CohereProvider : BaseAiProvider
+public class CohereProvider : BaseAiProvider, IModelFetcher
 {
+    public string ProviderName => Name;
+    public bool CanFetch => IsEnabled;
     private readonly string _apiKey;
 
     public override string Name => "cohere";
@@ -148,6 +150,74 @@ public class CohereProvider : BaseAiProvider
             "ERROR" => "error",
             _ => cohereReason?.ToLowerInvariant()
         };
+    }
+
+    public async Task<ProviderModelListResult> FetchModelsAsync(CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.cohere.com/v1/models");
+            httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
+
+            var response = await HttpClient.SendAsync(httpRequest, cts.Token);
+            stopwatch.Stop();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cts.Token);
+                Logger.LogError("Cohere models API error: {StatusCode} - {Content}", response.StatusCode, errorContent);
+                return ProviderModelListResult.CreateError(
+                    $"API returned {response.StatusCode}",
+                    (int)stopwatch.ElapsedMilliseconds);
+            }
+
+            var content = await response.Content.ReadAsStringAsync(cts.Token);
+            var modelsResponse = JsonSerializer.Deserialize<CohereModelsResponse>(content, JsonOptions);
+
+            var models = modelsResponse?.Models?
+                .Where(m => m.Name != null && m.Endpoints?.Contains("chat") == true)
+                .Select(m => new ProviderModelInfo
+                {
+                    Id = m.Name!,
+                    Name = m.Name!,
+                    ProviderName = Name,
+                    ContextLength = m.ContextLength,
+                    IsAvailable = true
+                })
+                .ToList() ?? new List<ProviderModelInfo>();
+
+            Logger.LogInformation("Fetched {Count} models from Cohere", models.Count);
+            return ProviderModelListResult.CreateSuccess(models, (int)stopwatch.ElapsedMilliseconds);
+        }
+        catch (OperationCanceledException)
+        {
+            stopwatch.Stop();
+            return ProviderModelListResult.CreateError("Request timed out", (int)stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Logger.LogError(ex, "Failed to fetch Cohere models");
+            return ProviderModelListResult.CreateError(ex.Message, (int)stopwatch.ElapsedMilliseconds);
+        }
+    }
+
+    // Models endpoint DTOs
+    private class CohereModelsResponse
+    {
+        public List<CohereModelData>? Models { get; set; }
+    }
+
+    private class CohereModelData
+    {
+        public string? Name { get; set; }
+        public List<string>? Endpoints { get; set; }
+        public int? ContextLength { get; set; }
     }
 
     // Cohere-specific DTOs

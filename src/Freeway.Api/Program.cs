@@ -114,12 +114,16 @@ try
     {
         var modelCacheService = scope.ServiceProvider.GetRequiredService<IModelCacheService>();
         var projectCacheService = scope.ServiceProvider.GetRequiredService<IProjectCacheService>();
+        var modelValidationJob = scope.ServiceProvider.GetRequiredService<IModelValidationJob>();
 
         Log.Information("Initializing model cache...");
         await modelCacheService.RefreshModelsAsync();
 
         Log.Information("Initializing project cache...");
         await projectCacheService.LoadCacheAsync();
+
+        Log.Information("Initializing provider model cache...");
+        await modelValidationJob.ValidateModelsAsync();
     }
 
     // Configure middleware pipeline
@@ -164,6 +168,11 @@ try
         "benchmark-providers",
         job => job.RunBenchmarkAsync(),
         "0 */6 * * *"); // Every 6 hours
+
+    RecurringJob.AddOrUpdate<Freeway.Infrastructure.Jobs.IModelValidationJob>(
+        "validate-provider-models",
+        job => job.ValidateModelsAsync(),
+        Cron.Daily(2, 0)); // Daily at 2 AM UTC
 
     app.MapControllers();
 

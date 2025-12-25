@@ -7,21 +7,21 @@ using Microsoft.Extensions.Logging;
 
 namespace Freeway.Infrastructure.Providers;
 
-public class GroqProvider : BaseAiProvider, IModelFetcher
+public class OpenAiProvider : BaseAiProvider, IModelFetcher
 {
     public string ProviderName => Name;
     public bool CanFetch => IsEnabled;
     private readonly string _apiKey;
 
-    public override string Name => "groq";
-    public override string DisplayName => "Groq";
+    public override string Name => "openai";
+    public override string DisplayName => "OpenAI";
     public override bool IsFreeProvider => true;
-    public override string DefaultModelId => "llama-3.3-70b-versatile";
+    public override string DefaultModelId => "gpt-4o-mini";
     protected override string ApiKey => _apiKey;
 
-    public GroqProvider(HttpClient httpClient, ILogger<GroqProvider> logger) : base(httpClient, logger)
+    public OpenAiProvider(HttpClient httpClient, ILogger<OpenAiProvider> logger) : base(httpClient, logger)
     {
-        _apiKey = Environment.GetEnvironmentVariable("GROQ_API_KEY") ?? "";
+        _apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? "";
     }
 
     public override async Task<ChatCompletionResult> CreateChatCompletionAsync(
@@ -39,10 +39,10 @@ public class GroqProvider : BaseAiProvider, IModelFetcher
 
             var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
 
-            var request = new GroqRequest
+            var request = new OpenAiRequest
             {
                 Model = model,
-                Messages = messages.Select(m => new GroqMessage { Role = m.Role, Content = m.Content }).ToList(),
+                Messages = messages.Select(m => new OpenAiMessage { Role = m.Role, Content = m.Content }).ToList(),
                 Temperature = options?.Temperature,
                 MaxTokens = options?.MaxTokens,
                 TopP = options?.TopP,
@@ -52,7 +52,7 @@ public class GroqProvider : BaseAiProvider, IModelFetcher
                 Stream = false
             };
 
-            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions");
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
             httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
             httpRequest.Content = JsonContent.Create(request, options: JsonOptions);
 
@@ -63,24 +63,24 @@ public class GroqProvider : BaseAiProvider, IModelFetcher
 
             if (!response.IsSuccessStatusCode)
             {
-                Logger.LogError("Groq API error: {StatusCode} - {Content}", response.StatusCode, responseContent);
+                Logger.LogError("OpenAI API error: {StatusCode} - {Content}", response.StatusCode, responseContent);
                 return CreateErrorResult(
-                    $"Groq API error: {response.StatusCode}",
+                    $"OpenAI API error: {response.StatusCode}",
                     (int)stopwatch.ElapsedMilliseconds,
                     (int)response.StatusCode);
             }
 
-            var groqResponse = JsonSerializer.Deserialize<GroqResponse>(responseContent, JsonOptions);
+            var openAiResponse = JsonSerializer.Deserialize<OpenAiResponse>(responseContent, JsonOptions);
 
-            if (groqResponse == null)
+            if (openAiResponse == null)
             {
-                return CreateErrorResult("Failed to parse Groq response", (int)stopwatch.ElapsedMilliseconds);
+                return CreateErrorResult("Failed to parse OpenAI response", (int)stopwatch.ElapsedMilliseconds);
             }
 
             return CreateSuccessResult(
-                id: groqResponse.Id ?? $"groq-{Guid.NewGuid():N}",
-                model: groqResponse.Model ?? model,
-                choices: groqResponse.Choices?.Select(c => new ChatCompletionChoice
+                id: openAiResponse.Id ?? $"openai-{Guid.NewGuid():N}",
+                model: openAiResponse.Model ?? model,
+                choices: openAiResponse.Choices?.Select(c => new ChatCompletionChoice
                 {
                     Index = c.Index,
                     Message = new ChatMessage
@@ -92,9 +92,9 @@ public class GroqProvider : BaseAiProvider, IModelFetcher
                 }).ToList() ?? new List<ChatCompletionChoice>(),
                 usage: new ChatCompletionUsage
                 {
-                    PromptTokens = groqResponse.Usage?.PromptTokens ?? 0,
-                    CompletionTokens = groqResponse.Usage?.CompletionTokens ?? 0,
-                    TotalTokens = groqResponse.Usage?.TotalTokens ?? 0
+                    PromptTokens = openAiResponse.Usage?.PromptTokens ?? 0,
+                    CompletionTokens = openAiResponse.Usage?.CompletionTokens ?? 0,
+                    TotalTokens = openAiResponse.Usage?.TotalTokens ?? 0
                 },
                 responseTimeMs: (int)stopwatch.ElapsedMilliseconds);
         }
@@ -106,7 +106,7 @@ public class GroqProvider : BaseAiProvider, IModelFetcher
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Logger.LogError(ex, "Groq API request failed");
+            Logger.LogError(ex, "OpenAI API request failed");
             return CreateErrorResult(ex.Message, (int)stopwatch.ElapsedMilliseconds);
         }
     }
@@ -120,7 +120,7 @@ public class GroqProvider : BaseAiProvider, IModelFetcher
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(30));
 
-            using var httpRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.groq.com/openai/v1/models");
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.openai.com/v1/models");
             httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
 
             var response = await HttpClient.SendAsync(httpRequest, cts.Token);
@@ -129,32 +129,31 @@ public class GroqProvider : BaseAiProvider, IModelFetcher
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync(cts.Token);
-                Logger.LogError("Groq models API error: {StatusCode} - {Content}", response.StatusCode, errorContent);
+                Logger.LogError("OpenAI models API error: {StatusCode} - {Content}", response.StatusCode, errorContent);
                 return ProviderModelListResult.CreateError(
                     $"API returned {response.StatusCode}",
                     (int)stopwatch.ElapsedMilliseconds);
             }
 
             var content = await response.Content.ReadAsStringAsync(cts.Token);
-            var modelsResponse = JsonSerializer.Deserialize<GroqModelsResponse>(content, JsonOptions);
+            var modelsResponse = JsonSerializer.Deserialize<OpenAiModelsResponse>(content, JsonOptions);
 
             var models = modelsResponse?.Data?
-                .Where(m => m.Id != null)
+                .Where(m => m.Id != null && IsChatModel(m.Id))
                 .Select(m => new ProviderModelInfo
                 {
                     Id = m.Id!,
                     Name = m.Id!,
                     ProviderName = Name,
                     OwnedBy = m.OwnedBy,
-                    ContextLength = m.ContextWindow,
                     CreatedAt = m.Created.HasValue
                         ? DateTimeOffset.FromUnixTimeSeconds(m.Created.Value).UtcDateTime
                         : null,
-                    IsAvailable = m.Active ?? true
+                    IsAvailable = true
                 })
                 .ToList() ?? new List<ProviderModelInfo>();
 
-            Logger.LogInformation("Fetched {Count} models from Groq", models.Count);
+            Logger.LogInformation("Fetched {Count} models from OpenAI", models.Count);
             return ProviderModelListResult.CreateSuccess(models, (int)stopwatch.ElapsedMilliseconds);
         }
         catch (OperationCanceledException)
@@ -165,31 +164,37 @@ public class GroqProvider : BaseAiProvider, IModelFetcher
         catch (Exception ex)
         {
             stopwatch.Stop();
-            Logger.LogError(ex, "Failed to fetch Groq models");
+            Logger.LogError(ex, "Failed to fetch OpenAI models");
             return ProviderModelListResult.CreateError(ex.Message, (int)stopwatch.ElapsedMilliseconds);
         }
     }
 
-    // Models endpoint DTOs
-    private class GroqModelsResponse
+    private static bool IsChatModel(string modelId)
     {
-        public List<GroqModelData>? Data { get; set; }
+        // Filter to only chat-capable models
+        return modelId.StartsWith("gpt-", StringComparison.OrdinalIgnoreCase) ||
+               modelId.StartsWith("o1", StringComparison.OrdinalIgnoreCase) ||
+               modelId.StartsWith("chatgpt", StringComparison.OrdinalIgnoreCase);
     }
 
-    private class GroqModelData
+    // Models endpoint DTOs
+    private class OpenAiModelsResponse
+    {
+        public List<OpenAiModelData>? Data { get; set; }
+    }
+
+    private class OpenAiModelData
     {
         public string? Id { get; set; }
         public string? OwnedBy { get; set; }
         public long? Created { get; set; }
-        public int? ContextWindow { get; set; }
-        public bool? Active { get; set; }
     }
 
-    // Groq-specific DTOs (OpenAI-compatible)
-    private class GroqRequest
+    // OpenAI-specific DTOs
+    private class OpenAiRequest
     {
         public string Model { get; set; } = string.Empty;
-        public List<GroqMessage> Messages { get; set; } = new();
+        public List<OpenAiMessage> Messages { get; set; } = new();
         public double? Temperature { get; set; }
         public int? MaxTokens { get; set; }
         public double? TopP { get; set; }
@@ -199,28 +204,28 @@ public class GroqProvider : BaseAiProvider, IModelFetcher
         public bool Stream { get; set; }
     }
 
-    private class GroqMessage
+    private class OpenAiMessage
     {
         public string Role { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
     }
 
-    private class GroqResponse
+    private class OpenAiResponse
     {
         public string? Id { get; set; }
         public string? Model { get; set; }
-        public List<GroqChoice>? Choices { get; set; }
-        public GroqUsage? Usage { get; set; }
+        public List<OpenAiChoice>? Choices { get; set; }
+        public OpenAiUsage? Usage { get; set; }
     }
 
-    private class GroqChoice
+    private class OpenAiChoice
     {
         public int Index { get; set; }
-        public GroqMessage? Message { get; set; }
+        public OpenAiMessage? Message { get; set; }
         public string? FinishReason { get; set; }
     }
 
-    private class GroqUsage
+    private class OpenAiUsage
     {
         public int PromptTokens { get; set; }
         public int CompletionTokens { get; set; }

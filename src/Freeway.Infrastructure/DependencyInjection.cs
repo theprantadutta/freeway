@@ -42,6 +42,7 @@ public static class DependencyInjection
         // Register AI Providers with HttpClient
         services.AddHttpClient<GeminiProvider>();
         services.AddHttpClient<GroqProvider>();
+        services.AddHttpClient<OpenAiProvider>();
         services.AddHttpClient<CohereProvider>();
         services.AddHttpClient<HuggingFaceProvider>();
         services.AddHttpClient<MistralProvider>();
@@ -54,6 +55,9 @@ public static class DependencyInjection
         services.AddSingleton<IAiProvider>(sp =>
             ActivatorUtilities.CreateInstance<GroqProvider>(sp,
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(GroqProvider))));
+        services.AddSingleton<IAiProvider>(sp =>
+            ActivatorUtilities.CreateInstance<OpenAiProvider>(sp,
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(OpenAiProvider))));
         services.AddSingleton<IAiProvider>(sp =>
             ActivatorUtilities.CreateInstance<CohereProvider>(sp,
                 sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(CohereProvider))));
@@ -73,6 +77,7 @@ public static class DependencyInjection
         services.AddSingleton<IModelCacheService, ModelCacheService>();
         services.AddSingleton<IProjectCacheService, ProjectCacheService>();
         services.AddSingleton<IProviderBenchmarkCache, ProviderBenchmarkCache>();
+        services.AddSingleton<IProviderModelCache, ProviderModelCache>();
 
         // Register orchestrator
         services.AddScoped<IProviderOrchestrator, ProviderOrchestrator>();
@@ -80,6 +85,11 @@ public static class DependencyInjection
         // Register background job services
         services.AddScoped<IBackgroundJobService, BackgroundJobService>();
         services.AddScoped<IProviderBenchmarkJob, ProviderBenchmarkJob>();
+        services.AddScoped<IModelValidationJob, ModelValidationJob>();
+
+        // Register IModelFetcher collection (providers that can fetch their models)
+        services.AddSingleton<IEnumerable<IModelFetcher>>(sp =>
+            sp.GetServices<IAiProvider>().OfType<IModelFetcher>().ToList());
 
         // Configure Hangfire
         services.AddHangfire(config =>

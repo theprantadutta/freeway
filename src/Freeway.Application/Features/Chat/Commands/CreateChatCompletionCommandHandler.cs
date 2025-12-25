@@ -13,6 +13,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
     private readonly IOpenRouterService _openRouterService;
     private readonly IProviderOrchestrator _providerOrchestrator;
     private readonly IModelCacheService _modelCacheService;
+    private readonly IProviderModelCache _providerModelCache;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDateTimeService _dateTimeService;
     private readonly ILogger<CreateChatCompletionCommandHandler> _logger;
@@ -21,6 +22,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         IOpenRouterService openRouterService,
         IProviderOrchestrator providerOrchestrator,
         IModelCacheService modelCacheService,
+        IProviderModelCache providerModelCache,
         IServiceScopeFactory scopeFactory,
         IDateTimeService dateTimeService,
         ILogger<CreateChatCompletionCommandHandler> logger)
@@ -28,6 +30,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         _openRouterService = openRouterService;
         _providerOrchestrator = providerOrchestrator;
         _modelCacheService = modelCacheService;
+        _providerModelCache = providerModelCache;
         _scopeFactory = scopeFactory;
         _dateTimeService = dateTimeService;
         _logger = logger;
@@ -71,6 +74,13 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         {
             // Resolve model for paid or specific model requests
             var resolved = ResolveModel(request.Model);
+
+            // Check for validation error
+            if (resolved.error != null)
+            {
+                return Result<ChatCompletionResponseDto>.Failure(resolved.error, 400);
+            }
+
             modelId = resolved.modelId!;
             modelType = resolved.modelType;
             model = resolved.model;
@@ -117,30 +127,59 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         });
     }
 
-    private (string? modelId, string modelType, CachedModel? model) ResolveModel(string requestedModel)
+    private (string? modelId, string modelType, CachedModel? model, string? error) ResolveModel(string requestedModel)
     {
         // Handle "free" and "paid" keywords
         if (requestedModel.Equals("free", StringComparison.OrdinalIgnoreCase))
         {
             var model = _modelCacheService.GetSelectedFreeModel();
-            return (model?.Id, "free", model);
+            return (model?.Id, "free", model, null);
         }
 
         if (requestedModel.Equals("paid", StringComparison.OrdinalIgnoreCase))
         {
             var model = _modelCacheService.GetSelectedPaidModel();
-            return (model?.Id, "paid", model);
+            return (model?.Id, "paid", model, null);
         }
 
-        // Look up specific model
+        // Look up specific model in legacy cache (OpenRouter models)
         var cachedModel = _modelCacheService.GetModelById(requestedModel);
         if (cachedModel != null)
         {
-            return (cachedModel.Id, cachedModel.IsFree ? "free" : "paid", cachedModel);
+            return (cachedModel.Id, cachedModel.IsFree ? "free" : "paid", cachedModel, null);
         }
 
-        // If not in cache, assume it's a valid model ID (pass-through)
-        return (requestedModel, "unknown", null);
+        // Check provider model cache for strict validation
+        var providers = _providerModelCache.FindProvidersForModel(requestedModel);
+        if (providers.Count > 0)
+        {
+            _logger.LogDebug("Model '{Model}' found on providers: {Providers}",
+                requestedModel, string.Join(", ", providers));
+            return (requestedModel, "specific", null, null);
+        }
+
+        // Check if it looks like an OpenRouter model format (contains /)
+        if (requestedModel.Contains('/'))
+        {
+            // OpenRouter format - check if it's in the openrouter provider cache
+            if (_providerModelCache.IsValidModel("openrouter", requestedModel))
+            {
+                return (requestedModel, "paid", null, null);
+            }
+        }
+
+        // Model not found in any cache - return error for strict validation
+        var summary = _providerModelCache.GetCacheSummary();
+        if (summary.TotalModelCount > 0)
+        {
+            // Cache is populated, so this is a genuinely invalid model
+            _logger.LogWarning("Model '{Model}' not found in any provider cache", requestedModel);
+            return (null, "unknown", null, $"Model '{requestedModel}' is not available. Use GET /v1/models to see available models.");
+        }
+
+        // Cache not yet populated - allow pass-through for backwards compatibility
+        _logger.LogDebug("Provider model cache not yet populated, allowing pass-through for '{Model}'", requestedModel);
+        return (requestedModel, "unknown", null, null);
     }
 
     private async Task LogUsageInBackgroundAsync(

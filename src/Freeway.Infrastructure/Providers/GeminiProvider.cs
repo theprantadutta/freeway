@@ -7,8 +7,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Freeway.Infrastructure.Providers;
 
-public class GeminiProvider : BaseAiProvider
+public class GeminiProvider : BaseAiProvider, IModelFetcher
 {
+    public string ProviderName => Name;
+    public bool CanFetch => IsEnabled;
     private readonly string _apiKey;
 
     public override string Name => "gemini";
@@ -145,6 +147,77 @@ public class GeminiProvider : BaseAiProvider
             "SAFETY" => "content_filter",
             _ => geminiReason?.ToLowerInvariant()
         };
+    }
+
+    public async Task<ProviderModelListResult> FetchModelsAsync(CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+            var url = $"https://generativelanguage.googleapis.com/v1beta/models?key={_apiKey}";
+            var response = await HttpClient.GetAsync(url, cts.Token);
+            stopwatch.Stop();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cts.Token);
+                Logger.LogError("Gemini models API error: {StatusCode} - {Content}", response.StatusCode, errorContent);
+                return ProviderModelListResult.CreateError(
+                    $"API returned {response.StatusCode}",
+                    (int)stopwatch.ElapsedMilliseconds);
+            }
+
+            var content = await response.Content.ReadAsStringAsync(cts.Token);
+            var modelsResponse = JsonSerializer.Deserialize<GeminiModelsListResponse>(content, JsonOptions);
+
+            var models = modelsResponse?.Models?
+                .Where(m => m.SupportedGenerationMethods?.Contains("generateContent") == true)
+                .Select(m => new ProviderModelInfo
+                {
+                    Id = m.Name?.Replace("models/", "") ?? "",
+                    Name = m.DisplayName ?? m.Name ?? "",
+                    ProviderName = Name,
+                    Description = m.Description,
+                    ContextLength = m.InputTokenLimit,
+                    IsAvailable = true
+                })
+                .Where(m => !string.IsNullOrEmpty(m.Id))
+                .ToList() ?? new List<ProviderModelInfo>();
+
+            Logger.LogInformation("Fetched {Count} models from Gemini", models.Count);
+            return ProviderModelListResult.CreateSuccess(models, (int)stopwatch.ElapsedMilliseconds);
+        }
+        catch (OperationCanceledException)
+        {
+            stopwatch.Stop();
+            return ProviderModelListResult.CreateError("Request timed out", (int)stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Logger.LogError(ex, "Failed to fetch Gemini models");
+            return ProviderModelListResult.CreateError(ex.Message, (int)stopwatch.ElapsedMilliseconds);
+        }
+    }
+
+    // Models list DTOs
+    private class GeminiModelsListResponse
+    {
+        public List<GeminiModelInfo>? Models { get; set; }
+    }
+
+    private class GeminiModelInfo
+    {
+        public string? Name { get; set; }
+        public string? DisplayName { get; set; }
+        public string? Description { get; set; }
+        public int? InputTokenLimit { get; set; }
+        public int? OutputTokenLimit { get; set; }
+        public List<string>? SupportedGenerationMethods { get; set; }
     }
 
     // Gemini-specific DTOs

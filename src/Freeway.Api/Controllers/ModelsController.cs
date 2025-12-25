@@ -32,4 +32,24 @@ public class ModelsController : BaseApiController
         var result = await Mediator.Send(new GetPaidModelsQuery());
         return HandleResult(result);
     }
+
+    /// <summary>
+    /// Get all models from all providers
+    /// </summary>
+    [HttpGet("/v1/models")]
+    public async Task<ActionResult> GetAllProviderModels([FromQuery] string? provider = null)
+    {
+        var result = await Mediator.Send(new GetProviderModelsQuery(provider));
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Get list of available providers with status
+    /// </summary>
+    [HttpGet("/v1/providers")]
+    public async Task<ActionResult> GetProviders()
+    {
+        var result = await Mediator.Send(new GetProvidersQuery());
+        return HandleResult(result);
+    }
 }

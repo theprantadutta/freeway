@@ -7,8 +7,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Freeway.Infrastructure.Providers;
 
-public class MistralProvider : BaseAiProvider
+public class MistralProvider : BaseAiProvider, IModelFetcher
 {
+    public string ProviderName => Name;
+    public bool CanFetch => IsEnabled;
     private readonly string _apiKey;
 
     public override string Name => "mistral";
@@ -105,6 +107,81 @@ public class MistralProvider : BaseAiProvider
             Logger.LogError(ex, "Mistral API request failed");
             return CreateErrorResult(ex.Message, (int)stopwatch.ElapsedMilliseconds);
         }
+    }
+
+    public async Task<ProviderModelListResult> FetchModelsAsync(CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.mistral.ai/v1/models");
+            httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
+
+            var response = await HttpClient.SendAsync(httpRequest, cts.Token);
+            stopwatch.Stop();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cts.Token);
+                Logger.LogError("Mistral models API error: {StatusCode} - {Content}", response.StatusCode, errorContent);
+                return ProviderModelListResult.CreateError(
+                    $"API returned {response.StatusCode}",
+                    (int)stopwatch.ElapsedMilliseconds);
+            }
+
+            var content = await response.Content.ReadAsStringAsync(cts.Token);
+            var modelsResponse = JsonSerializer.Deserialize<MistralModelsResponse>(content, JsonOptions);
+
+            var models = modelsResponse?.Data?
+                .Where(m => m.Id != null)
+                .Select(m => new ProviderModelInfo
+                {
+                    Id = m.Id!,
+                    Name = m.Id!,
+                    ProviderName = Name,
+                    OwnedBy = m.OwnedBy,
+                    Description = m.Description,
+                    ContextLength = m.MaxContextLength,
+                    CreatedAt = m.Created.HasValue
+                        ? DateTimeOffset.FromUnixTimeSeconds(m.Created.Value).UtcDateTime
+                        : null,
+                    IsAvailable = true
+                })
+                .ToList() ?? new List<ProviderModelInfo>();
+
+            Logger.LogInformation("Fetched {Count} models from Mistral", models.Count);
+            return ProviderModelListResult.CreateSuccess(models, (int)stopwatch.ElapsedMilliseconds);
+        }
+        catch (OperationCanceledException)
+        {
+            stopwatch.Stop();
+            return ProviderModelListResult.CreateError("Request timed out", (int)stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Logger.LogError(ex, "Failed to fetch Mistral models");
+            return ProviderModelListResult.CreateError(ex.Message, (int)stopwatch.ElapsedMilliseconds);
+        }
+    }
+
+    // Models endpoint DTOs
+    private class MistralModelsResponse
+    {
+        public List<MistralModelData>? Data { get; set; }
+    }
+
+    private class MistralModelData
+    {
+        public string? Id { get; set; }
+        public string? OwnedBy { get; set; }
+        public string? Description { get; set; }
+        public long? Created { get; set; }
+        public int? MaxContextLength { get; set; }
     }
 
     // Mistral-specific DTOs (OpenAI-compatible)

@@ -12,8 +12,10 @@ namespace Freeway.Infrastructure.Providers;
 /// OpenRouter provider - used as PAID fallback only when all free providers fail.
 /// Uses cheapest available paid model.
 /// </summary>
-public class OpenRouterProvider : BaseAiProvider
+public class OpenRouterProvider : BaseAiProvider, IModelFetcher
 {
+    public string ProviderName => Name;
+    public bool CanFetch => IsEnabled;
     private readonly string _apiKey;
     private readonly IModelCacheService _modelCacheService;
 
@@ -125,6 +127,77 @@ public class OpenRouterProvider : BaseAiProvider
             Logger.LogError(ex, "OpenRouter API request failed");
             return CreateErrorResult(ex.Message, (int)stopwatch.ElapsedMilliseconds);
         }
+    }
+
+    public async Task<ProviderModelListResult> FetchModelsAsync(CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+
+            var response = await HttpClient.GetAsync("https://openrouter.ai/api/v1/models", cts.Token);
+            stopwatch.Stop();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cts.Token);
+                Logger.LogError("OpenRouter models API error: {StatusCode} - {Content}", response.StatusCode, errorContent);
+                return ProviderModelListResult.CreateError(
+                    $"API returned {response.StatusCode}",
+                    (int)stopwatch.ElapsedMilliseconds);
+            }
+
+            var content = await response.Content.ReadAsStringAsync(cts.Token);
+            var modelsResponse = JsonSerializer.Deserialize<OpenRouterModelsResponse>(content, JsonOptions);
+
+            var models = modelsResponse?.Data?
+                .Where(m => m.Id != null)
+                .Select(m => new ProviderModelInfo
+                {
+                    Id = m.Id!,
+                    Name = m.Name ?? m.Id!,
+                    ProviderName = Name,
+                    Description = m.Description,
+                    ContextLength = m.ContextLength,
+                    CreatedAt = m.Created.HasValue
+                        ? DateTimeOffset.FromUnixTimeSeconds(m.Created.Value).UtcDateTime
+                        : null,
+                    IsAvailable = true
+                })
+                .ToList() ?? new List<ProviderModelInfo>();
+
+            Logger.LogInformation("Fetched {Count} models from OpenRouter", models.Count);
+            return ProviderModelListResult.CreateSuccess(models, (int)stopwatch.ElapsedMilliseconds);
+        }
+        catch (OperationCanceledException)
+        {
+            stopwatch.Stop();
+            return ProviderModelListResult.CreateError("Request timed out", (int)stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Logger.LogError(ex, "Failed to fetch OpenRouter models");
+            return ProviderModelListResult.CreateError(ex.Message, (int)stopwatch.ElapsedMilliseconds);
+        }
+    }
+
+    // Models endpoint DTOs
+    private class OpenRouterModelsResponse
+    {
+        public List<OpenRouterModelData>? Data { get; set; }
+    }
+
+    private class OpenRouterModelData
+    {
+        public string? Id { get; set; }
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+        public int? ContextLength { get; set; }
+        public long? Created { get; set; }
     }
 
     // OpenRouter-specific DTOs
