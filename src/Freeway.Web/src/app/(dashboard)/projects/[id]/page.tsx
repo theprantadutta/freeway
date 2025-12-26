@@ -210,7 +210,7 @@ export default function ProjectDetailsPage() {
               />
               <StatCard
                 title="Success Rate"
-                value={`${summary.success_rate.toFixed(1)}%`}
+                value={`${(summary.success_rate ?? 0).toFixed(1)}%`}
                 icon={Activity}
                 iconColor="text-green-500"
               />
@@ -240,7 +240,7 @@ export default function ProjectDetailsPage() {
               />
               <StatCard
                 title="Avg Response"
-                value={`${summary.avg_response_time_ms.toFixed(0)}ms`}
+                value={`${(summary.avg_response_time_ms ?? 0).toFixed(0)}ms`}
                 icon={Clock}
                 iconColor="text-amber-500"
               />

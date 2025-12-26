@@ -35,32 +35,34 @@ public class GetUsageLogsQueryHandler : IRequestHandler<GetUsageLogsQuery, Resul
 
         var totalCount = await query.CountAsync(cancellationToken);
 
-        var logs = await query
+        // First materialize the query, then project in memory to avoid LINQ translation issues
+        var usageLogs = await query
             .OrderByDescending(u => u.CreatedAt)
             .Skip(request.Offset)
             .Take(Math.Min(request.Limit, 1000))
-            .Select(u => new UsageLogDto
-            {
-                Id = u.Id,
-                ProjectId = u.ProjectId,
-                ModelId = u.ModelId,
-                ModelType = u.ModelType,
-                InputTokens = u.InputTokens,
-                OutputTokens = u.OutputTokens,
-                ResponseTimeMs = u.ResponseTimeMs,
-                CostUsd = u.CostUsd,
-                Success = u.Success,
-                ErrorMessage = u.ErrorMessage,
-                RequestId = u.RequestId,
-                CreatedAt = u.CreatedAt,
-                Provider = u.Provider,
-                RequestMessages = u.RequestMessages != null
-                    ? u.RequestMessages.Select(m => new ChatMessageDto { Role = m.Role, Content = m.Content }).ToList()
-                    : null,
-                ResponseContent = u.ResponseContent,
-                FinishReason = u.FinishReason
-            })
             .ToListAsync(cancellationToken);
+
+        var logs = usageLogs.Select(u => new UsageLogDto
+        {
+            Id = u.Id,
+            ProjectId = u.ProjectId,
+            ModelId = u.ModelId,
+            ModelType = u.ModelType,
+            InputTokens = u.InputTokens,
+            OutputTokens = u.OutputTokens,
+            ResponseTimeMs = u.ResponseTimeMs,
+            CostUsd = u.CostUsd,
+            Success = u.Success,
+            ErrorMessage = u.ErrorMessage,
+            RequestId = u.RequestId,
+            CreatedAt = u.CreatedAt,
+            Provider = u.Provider,
+            RequestMessages = u.RequestMessages?
+                .Select(m => new ChatMessageDto { Role = m.Role, Content = m.Content })
+                .ToList(),
+            ResponseContent = u.ResponseContent,
+            FinishReason = u.FinishReason
+        }).ToList();
 
         return Result<UsageLogsResponseDto>.Success(new UsageLogsResponseDto
         {
