@@ -1,4 +1,4 @@
-# Freeway Web - Next.js 15 Frontend
+# Freeway Web - Next.js 16 Frontend
 FROM node:22-alpine AS base
 
 # Install dependencies only when needed

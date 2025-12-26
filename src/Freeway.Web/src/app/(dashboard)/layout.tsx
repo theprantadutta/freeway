@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { Sidebar } from "@/components/layout/sidebar";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { ToastProvider } from "@/components/ui/toast";
+import { Zap } from "lucide-react";
 
 export default function DashboardLayout({
   children,
@@ -13,10 +14,18 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const [isHydrated, setIsHydrated] = useState(false);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const expiresAt = useAuthStore((state) => state.expiresAt);
 
+  // Wait for Zustand store to hydrate from localStorage
   useEffect(() => {
+    setIsHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+
     // Check if token is expired
     if (expiresAt && new Date(expiresAt) < new Date()) {
       useAuthStore.getState().clearAuth();
@@ -27,7 +36,21 @@ export default function DashboardLayout({
     if (!isAuthenticated) {
       router.push("/login");
     }
-  }, [isAuthenticated, expiresAt, router]);
+  }, [isAuthenticated, expiresAt, router, isHydrated]);
+
+  // Show loading while hydrating
+  if (!isHydrated) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="flex flex-col items-center gap-4">
+          <div className="p-3 bg-primary-100 dark:bg-primary-900/30 rounded-xl animate-pulse">
+            <Zap className="h-8 w-8 text-primary-600 dark:text-primary-400" />
+          </div>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return null;
