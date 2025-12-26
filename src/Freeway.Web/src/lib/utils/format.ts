@@ -1,4 +1,5 @@
-export function formatNumber(num: number): string {
+export function formatNumber(num: number | undefined | null): string {
+  if (num == null) return "0";
   if (num >= 1_000_000) {
     return `${(num / 1_000_000).toFixed(1)}M`;
   }
@@ -8,7 +9,8 @@ export function formatNumber(num: number): string {
   return num.toString();
 }
 
-export function formatCurrency(amount: number, decimals = 4): string {
+export function formatCurrency(amount: number | undefined | null, decimals = 4): string {
+  if (amount == null) return "$0.00";
   return `$${amount.toFixed(decimals)}`;
 }
 
