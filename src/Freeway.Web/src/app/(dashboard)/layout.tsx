@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -14,17 +14,12 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const [isHydrated, setIsHydrated] = useState(false);
+  const hasHydrated = useAuthStore((state) => state._hasHydrated);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const expiresAt = useAuthStore((state) => state.expiresAt);
 
-  // Wait for Zustand store to hydrate from localStorage
   useEffect(() => {
-    setIsHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!isHydrated) return;
+    if (!hasHydrated) return;
 
     // Check if token is expired
     if (expiresAt && new Date(expiresAt) < new Date()) {
@@ -36,10 +31,10 @@ export default function DashboardLayout({
     if (!isAuthenticated) {
       router.push("/login");
     }
-  }, [isAuthenticated, expiresAt, router, isHydrated]);
+  }, [isAuthenticated, expiresAt, router, hasHydrated]);
 
   // Show loading while hydrating
-  if (!isHydrated) {
+  if (!hasHydrated) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-950">
         <div className="flex flex-col items-center gap-4">

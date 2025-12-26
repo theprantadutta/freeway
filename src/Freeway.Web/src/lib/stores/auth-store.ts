@@ -7,8 +7,10 @@ interface AuthState {
   user: User | null;
   expiresAt: string | null;
   isAuthenticated: boolean;
+  _hasHydrated: boolean;
   setAuth: (token: string, user: User, expiresAt: string) => void;
   clearAuth: () => void;
+  setHasHydrated: (state: boolean) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -18,6 +20,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       expiresAt: null,
       isAuthenticated: false,
+      _hasHydrated: false,
       setAuth: (token, user, expiresAt) =>
         set({
           token,
@@ -32,9 +35,13 @@ export const useAuthStore = create<AuthState>()(
           expiresAt: null,
           isAuthenticated: false,
         }),
+      setHasHydrated: (state) => set({ _hasHydrated: state }),
     }),
     {
       name: "freeway-auth",
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     }
   )
 );
