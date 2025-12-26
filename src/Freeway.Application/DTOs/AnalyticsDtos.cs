@@ -4,9 +4,10 @@ public class GlobalSummaryDto
 {
     public int TotalProjects { get; set; }
     public int ActiveProjects { get; set; }
-    public int TotalRequestsToday { get; set; }
-    public int TotalRequestsThisMonth { get; set; }
-    public decimal TotalCostThisMonthUsd { get; set; }
+    public int RequestsToday { get; set; }
+    public int RequestsThisMonth { get; set; }
+    public decimal TotalCostToday { get; set; }
+    public decimal TotalCostThisMonth { get; set; }
 }
 
 public class UsageSummaryDto

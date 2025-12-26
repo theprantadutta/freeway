@@ -26,11 +26,15 @@ public class GetGlobalSummaryQueryHandler : IRequestHandler<GetGlobalSummaryQuer
         var totalProjects = await _context.Projects.CountAsync(cancellationToken);
         var activeProjects = await _context.Projects.CountAsync(p => p.IsActive, cancellationToken);
 
-        var totalRequestsToday = await _context.UsageLogs
+        var requestsToday = await _context.UsageLogs
             .CountAsync(u => u.CreatedAt >= todayStart, cancellationToken);
 
-        var totalRequestsThisMonth = await _context.UsageLogs
+        var requestsThisMonth = await _context.UsageLogs
             .CountAsync(u => u.CreatedAt >= monthStart, cancellationToken);
+
+        var totalCostToday = await _context.UsageLogs
+            .Where(u => u.CreatedAt >= todayStart)
+            .SumAsync(u => u.CostUsd, cancellationToken);
 
         var totalCostThisMonth = await _context.UsageLogs
             .Where(u => u.CreatedAt >= monthStart)
@@ -40,9 +44,10 @@ public class GetGlobalSummaryQueryHandler : IRequestHandler<GetGlobalSummaryQuer
         {
             TotalProjects = totalProjects,
             ActiveProjects = activeProjects,
-            TotalRequestsToday = totalRequestsToday,
-            TotalRequestsThisMonth = totalRequestsThisMonth,
-            TotalCostThisMonthUsd = totalCostThisMonth
+            RequestsToday = requestsToday,
+            RequestsThisMonth = requestsThisMonth,
+            TotalCostToday = totalCostToday,
+            TotalCostThisMonth = totalCostThisMonth
         });
     }
 }
