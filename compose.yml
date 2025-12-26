@@ -25,6 +25,33 @@ services:
       retries: 3
       start_period: 40s
 
+  freeway-web:
+    image: freeway-web
+    container_name: freeway-web
+    build:
+      context: ./src/Freeway.Web
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=https://freeway.pranta.dev
+    restart: unless-stopped
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.freeway-web.rule=Host(`app.freeway.pranta.dev`)"
+      - "traefik.http.routers.freeway-web.entrypoints=websecure"
+      - "traefik.http.routers.freeway-web.tls.certresolver=letsencrypt"
+      - "traefik.http.services.freeway-web.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      freeway:
+        condition: service_healthy
+
 networks:
   proxy:
     external: true

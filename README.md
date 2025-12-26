@@ -1,26 +1,29 @@
 # Freeway
 
-An AI Gateway that proxies requests to OpenRouter with project management, usage tracking, and analytics.
+A multi-provider AI Gateway with project management, usage tracking, analytics, and a web control panel.
 
 ## Overview
 
 Freeway is a full-featured AI Gateway built with .NET 10 that:
-- Proxies chat completion requests to OpenRouter
+- Proxies chat completion requests to multiple AI providers (OpenRouter, OpenAI, Gemini, Groq, Mistral, Cohere, HuggingFace)
 - Manages projects with individual API keys
 - Tracks usage, costs, and analytics per project
 - Automatically selects best free and cheapest paid models
 - Provides a complete admin API for management
+- Includes a modern Next.js web control panel with JWT authentication
 
 ## Features
 
 - **OpenAI-Compatible Chat Endpoint**: `POST /chat/completions` with model selection (`free`, `paid`, or specific model ID)
+- **Multi-Provider Support**: Fallback across 8 AI providers for reliability
 - **Project Management**: Create projects with individual API keys, rate limits, and metadata
 - **Usage Tracking**: Logs all requests with tokens, costs, and response times
 - **Admin Analytics**: Usage summaries, per-project stats, and detailed logs
 - **Model Selection**: Auto-selects best free model (by context) and cheapest paid model (by price)
 - **Daily Refresh**: Models updated via Hangfire background jobs
-- **PostgreSQL Storage**: Persistent storage for projects and usage data
-- **Docker Ready**: Includes Dockerfile and compose.yaml with Traefik support
+- **PostgreSQL Storage**: Persistent storage for projects, users, and usage data
+- **Web Control Panel**: Next.js 15 dashboard with JWT authentication
+- **Docker Ready**: Includes Dockerfile and compose.yml with Traefik support
 
 ## Architecture
 
@@ -31,21 +34,43 @@ freeway/
 ├── src/
 │   ├── Freeway.Domain/           # Entities, Interfaces
 │   ├── Freeway.Application/      # CQRS handlers, DTOs, Validators
-│   ├── Freeway.Infrastructure/   # EF Core, OpenRouter client, Caching
-│   └── Freeway.Api/              # Controllers, Middleware
-├── Dockerfile
-├── compose.yaml
+│   ├── Freeway.Infrastructure/   # EF Core, Provider clients, Caching
+│   ├── Freeway.Api/              # Controllers, Middleware
+│   └── Freeway.Web/              # Next.js 15 Control Panel
+├── Dockerfile                    # API container
+├── compose.yml
 └── .env.example
 ```
 
 ## Authentication
 
-Freeway uses two types of API keys:
+Freeway supports multiple authentication methods:
 
-| Key Type | Header | Used For |
-|----------|--------|----------|
-| Admin Key | `X-Api-Key` | Admin endpoints, model info, control panel |
-| Project Key | `X-Api-Key` | Chat completions endpoint |
+| Method | Header/Cookie | Used For |
+|--------|---------------|----------|
+| Admin API Key | `X-Api-Key` | Admin endpoints, model info, CLI tools |
+| Project API Key | `X-Api-Key` | Chat completions endpoint |
+| JWT Bearer Token | `Authorization: Bearer <token>` | Web control panel |
+
+### JWT Authentication (Web Panel)
+
+The web control panel uses JWT tokens for authentication:
+
+```bash
+# Login
+POST /auth/login
+{
+  "username": "admin",
+  "password": "your-password"
+}
+
+# Response
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "user": { "id": "...", "username": "admin" },
+  "expiresAt": "2025-01-02T00:00:00Z"
+}
+```
 
 ## API Endpoints
 
@@ -79,7 +104,7 @@ OpenAI-compatible chat completion endpoint.
 {
   "id": "chatcmpl-abc123",
   "created": 1234567890,
-  "model": "x-ai/grok-4.1-fast:free",
+  "model": "google/gemini-2.0-flash-exp:free",
   "choices": [
     {
       "index": 0,
@@ -105,7 +130,17 @@ GET /models/paid     # All paid models (ranked by price)
 GET /health          # Service health check
 ```
 
-### Admin Endpoints (Admin Key Only)
+### Authentication Endpoints (Public/JWT)
+
+```bash
+POST /auth/login              # Login with username/password
+POST /auth/register           # Register new user (first user becomes admin)
+GET  /auth/me                 # Get current user info (requires JWT)
+POST /auth/change-password    # Change password (requires JWT)
+POST /auth/logout             # Logout (optional, client-side)
+```
+
+### Admin Endpoints (Admin Key or JWT)
 
 #### Project Management
 
@@ -159,9 +194,9 @@ PUT /admin/model/paid   # Set selected paid model
 #### Analytics
 
 ```bash
-GET /admin/analytics/summary        # Global summary
-GET /admin/analytics/usage?project_id={id}  # Project usage stats
-GET /admin/analytics/logs?project_id={id}   # Detailed usage logs
+GET /admin/analytics/summary                    # Global summary
+GET /admin/analytics/usage?project_id={id}      # Project usage stats
+GET /admin/analytics/logs?project_id={id}       # Detailed usage logs
 ```
 
 **Global Summary Response:**
@@ -181,15 +216,24 @@ Environment variables (see `.env.example`):
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ADMIN_API_KEY` | Yes | Admin API key for control panel |
-| `OPENROUTER_API_KEY` | Yes | OpenRouter API key for chat completions |
+| `PORT` | No | API port (default: 8080) |
+| `ADMIN_API_KEY` | Yes | Admin API key for CLI/scripts |
+| `OPENROUTER_API_KEY` | Yes | OpenRouter API key |
+| `OPENAI_API_KEY` | No | OpenAI API key (for fallback) |
+| `GEMINI_API_KEY` | No | Google Gemini API key (for fallback) |
+| `GROQ_API_KEY` | No | Groq API key (for fallback) |
+| `MISTRAL_API_KEY` | No | Mistral API key (for fallback) |
+| `COHERE_API_KEY` | No | Cohere API key (for fallback) |
+| `HUGGINGFACE_API_KEY` | No | HuggingFace API key (for fallback) |
 | `DB_HOST` | No | Database host (default: localhost) |
 | `DB_PORT` | No | Database port (default: 5432) |
 | `DB_USER` | No | Database user (default: postgres) |
 | `DB_PASSWORD` | No | Database password |
 | `DB_NAME` | No | Database name (default: freeway) |
-| `HANGFIRE_USERNAME` | No | Hangfire dashboard username (default: admin) |
-| `HANGFIRE_PASSWORD` | No | Hangfire dashboard password (default: admin) |
+| `JWT_SECRET` | Yes | Secret key for JWT tokens (min 32 chars) |
+| `JWT_EXPIRY_HOURS` | No | JWT token expiry (default: 24) |
+| `HANGFIRE_USERNAME` | No | Hangfire dashboard username |
+| `HANGFIRE_PASSWORD` | No | Hangfire dashboard password |
 | `ALLOWED_ORIGINS` | No | CORS origins (default: *) |
 
 ## Quick Start
@@ -197,9 +241,12 @@ Environment variables (see `.env.example`):
 ### Prerequisites
 
 - .NET 10 SDK
+- Node.js 22+ (for web panel)
 - PostgreSQL database
 
 ### Local Development
+
+#### 1. Backend API
 
 ```bash
 # Clone and enter directory
@@ -207,7 +254,11 @@ cd freeway
 
 # Configure environment
 cp .env.example .env
-# Edit .env and set ADMIN_API_KEY, OPENROUTER_API_KEY, and DB_* values
+# Edit .env and set required values:
+#   - ADMIN_API_KEY
+#   - OPENROUTER_API_KEY
+#   - JWT_SECRET (minimum 32 characters)
+#   - DB_* values
 
 # Restore and build
 dotnet restore
@@ -216,24 +267,53 @@ dotnet build
 # Run migrations
 dotnet ef database update -p src/Freeway.Infrastructure -s src/Freeway.Api
 
-# Run the application
+# Run the API
 dotnet run --project src/Freeway.Api
 ```
 
-The API will be available at `http://localhost:5000` (or as configured in launchSettings.json).
+The API will be available at `http://localhost:8080`.
 
-### Docker
+#### 2. Web Control Panel
 
 ```bash
-# Build and start
+# Enter web directory
+cd src/Freeway.Web
+
+# Install dependencies
+npm install
+
+# Configure environment
+cp .env.example .env.local
+# Edit .env.local:
+#   NEXT_PUBLIC_API_URL=http://localhost:8080
+
+# Run development server
+npm run dev
+```
+
+The web panel will be available at `http://localhost:3000`.
+
+#### 3. First User Setup
+
+Navigate to `http://localhost:3000` and register the first user. The first registered user will be created as an admin.
+
+### Docker Deployment
+
+```bash
+# Build and start all services
 docker compose up -d --build
 
 # View logs
 docker compose logs -f freeway
+docker compose logs -f freeway-web
 
 # Stop services
 docker compose down
 ```
+
+Services will be available at:
+- API: `https://freeway.pranta.dev` (configure in compose.yml)
+- Web Panel: `https://app.freeway.pranta.dev` (configure in compose.yml)
 
 ## Project Structure
 
@@ -241,7 +321,7 @@ docker compose down
 freeway/
 ├── src/
 │   ├── Freeway.Domain/
-│   │   ├── Entities/              # Project, UsageLog, ChatMessage
+│   │   ├── Entities/              # Project, UsageLog, User, ChatMessage
 │   │   ├── Common/                # BaseEntity
 │   │   └── Interfaces/            # Service interfaces
 │   ├── Freeway.Application/
@@ -255,97 +335,136 @@ freeway/
 │   │       └── Health/
 │   ├── Freeway.Infrastructure/
 │   │   ├── Persistence/           # EF Core DbContext, Configurations
-│   │   ├── Services/              # OpenRouter, Caching, ApiKey services
+│   │   ├── Services/              # Provider clients, Auth, Caching
 │   │   ├── Jobs/                  # Hangfire background jobs
 │   │   └── DependencyInjection.cs
-│   └── Freeway.Api/
-│       ├── Controllers/           # API controllers
-│       ├── Middleware/            # Auth, Exception handling
-│       ├── Attributes/            # RequireAdmin, RequireProject
-│       └── Program.cs             # Application startup
-├── Dockerfile
-├── compose.yaml
+│   ├── Freeway.Api/
+│   │   ├── Controllers/           # API controllers (including AuthController)
+│   │   ├── Middleware/            # Auth, Exception handling
+│   │   ├── Attributes/            # RequireAdmin, RequireProject
+│   │   └── Program.cs             # Application startup
+│   └── Freeway.Web/               # Next.js 15 Control Panel
+│       ├── src/
+│       │   ├── app/               # App Router pages
+│       │   │   ├── (auth)/        # Login page
+│       │   │   └── (dashboard)/   # Protected pages
+│       │   ├── components/        # React components
+│       │   │   ├── ui/            # Reusable UI components
+│       │   │   └── layout/        # Sidebar, Header, Mobile Nav
+│       │   └── lib/               # Utilities, API client, stores
+│       ├── Dockerfile
+│       └── package.json
+├── Dockerfile                     # API container
+├── compose.yml
 ├── Freeway.sln
 └── .env.example
 ```
+
+## Web Control Panel Features
+
+The Next.js web panel provides:
+
+### Dashboard
+- Stats overview: Total projects, active projects, requests today, monthly cost
+- Selected models display (free and paid)
+- Quick navigation to all features
+
+### Models
+- Browse all available models (free and paid tabs)
+- Search models by name or ID
+- View model details (context length, pricing, capabilities)
+- Select active free/paid models
+
+### Projects
+- Create, edit, and delete projects
+- View and copy API keys
+- Rotate API keys with confirmation
+- Set rate limits and metadata
+- View project status (active/inactive)
+
+### Project Details
+- Detailed usage statistics
+- Usage by model breakdown (pie chart)
+- Request logs with pagination
+- Filter logs by date range
+
+### Settings
+- User profile information
+- Theme toggle (Light/Dark/System)
+- API connection status
+- Logout
 
 ## Usage Examples
 
 ### Create a Project and Make a Request
 
-```csharp
-using System.Net.Http.Json;
+```bash
+# Using curl
 
-var client = new HttpClient { BaseAddress = new Uri("http://localhost:5000") };
-var adminKey = "your-admin-key";
+# 1. Create a project (with Admin API key)
+curl -X POST http://localhost:8080/admin/projects \
+  -H "X-Api-Key: your-admin-key" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My App", "rate_limit_per_minute": 100}'
 
-// 1. Create a project
-client.DefaultRequestHeaders.Add("X-Api-Key", adminKey);
-var createResponse = await client.PostAsJsonAsync("/admin/projects", new
-{
-    name = "My App",
-    rate_limit_per_minute = 100
-});
-var project = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
-var projectKey = project.GetProperty("api_key").GetString(); // Save this!
+# Response includes api_key - save it!
 
-// 2. Use the project key for chat completions
-client.DefaultRequestHeaders.Remove("X-Api-Key");
-client.DefaultRequestHeaders.Add("X-Api-Key", projectKey);
-var chatResponse = await client.PostAsJsonAsync("/chat/completions", new
-{
-    model = "free",
-    messages = new[] { new { role = "user", content = "Hello!" } }
-});
-var completion = await chatResponse.Content.ReadFromJsonAsync<JsonElement>();
-Console.WriteLine(completion.GetProperty("choices")[0]
-    .GetProperty("message")
-    .GetProperty("content")
-    .GetString());
+# 2. Make a chat completion (with Project API key)
+curl -X POST http://localhost:8080/chat/completions \
+  -H "X-Api-Key: fw_your-project-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "free",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+### Using JWT Authentication (Web Panel)
+
+```bash
+# 1. Login
+curl -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "your-password"}'
+
+# Response: {"token": "eyJ...", "user": {...}, "expiresAt": "..."}
+
+# 2. Use token for admin endpoints
+curl http://localhost:8080/admin/projects \
+  -H "Authorization: Bearer eyJ..."
 ```
 
 ### Check Usage Analytics
 
-```csharp
-client.DefaultRequestHeaders.Clear();
-client.DefaultRequestHeaders.Add("X-Api-Key", adminKey);
-
-var usageResponse = await client.GetAsync($"/admin/analytics/usage?project_id={projectId}");
-var usage = await usageResponse.Content.ReadFromJsonAsync<JsonElement>();
-var summary = usage.GetProperty("summary");
-Console.WriteLine($"Total requests: {summary.GetProperty("total_requests")}");
-Console.WriteLine($"Total cost: ${summary.GetProperty("total_cost_usd"):F4}");
+```bash
+curl "http://localhost:8080/admin/analytics/usage?project_id=YOUR_PROJECT_ID" \
+  -H "X-Api-Key: your-admin-key"
 ```
-
-## Flutter Control Panel
-
-A Flutter control panel is available at `../control_plane` for managing Freeway:
-
-- Dashboard with stats and selected models
-- Browse and search all available models
-- Create, edit, and delete projects
-- View API keys and rotate them
-- Light/dark theme support
-- Responsive design (mobile, tablet, desktop)
-
-See `../control_plane/README.md` for setup instructions.
 
 ## Hangfire Dashboard
 
 Background job monitoring is available at `/hangfire` (requires basic auth with `HANGFIRE_USERNAME` and `HANGFIRE_PASSWORD`).
 
 Recurring jobs:
-- **refresh-models**: Daily at midnight UTC - fetches models from OpenRouter
+- **refresh-models**: Daily at midnight UTC - fetches models from all providers
 - **refresh-project-cache**: Daily at 1 AM UTC - reloads project cache from database
 
 ## Deployment
 
-The included `compose.yaml` is configured for Traefik reverse proxy:
+The included `compose.yml` is configured for Traefik reverse proxy:
 
-- Domain: `freeway.pranta.dev` (configure in compose.yaml)
+| Service | Domain | Port |
+|---------|--------|------|
+| API | `freeway.pranta.dev` | 8080 |
+| Web Panel | `app.freeway.pranta.dev` | 3000 |
+
+Features:
 - TLS: Automatic via Let's Encrypt
 - Network: External `proxy` network
-- Health check: `/health` endpoint
+- Health checks: `/health` (API), `/` (Web)
+- Automatic restart on failure
+
+To customize domains, edit the Traefik labels in `compose.yml`.
 
 ## How It Works
 
@@ -353,7 +472,7 @@ The included `compose.yaml` is configured for Traefik reverse proxy:
    - Loads environment from `.env` file
    - Initializes PostgreSQL connection via EF Core
    - Loads project cache from database
-   - Fetches models from OpenRouter API
+   - Fetches models from all configured providers
    - Starts Hangfire background job server
 
 2. **Model categorization**:
@@ -366,17 +485,18 @@ The included `compose.yaml` is configured for Traefik reverse proxy:
 
 4. **Background jobs**:
    - Hangfire runs daily refresh at midnight UTC
-   - Updates model list from OpenRouter
+   - Updates model list from all providers
    - Refreshes project cache from database
 
 5. **Request flow**:
-   - Project key validated against cached hashes (BCrypt)
+   - Authentication validated (API key or JWT)
    - Model resolved (free/paid/specific)
-   - Request proxied to OpenRouter
+   - Request proxied to appropriate provider
    - Usage logged to database
 
 ## Tech Stack
 
+### Backend
 - **.NET 10** - Runtime
 - **ASP.NET Core** - Web framework
 - **Entity Framework Core** - ORM
@@ -385,5 +505,20 @@ The included `compose.yaml` is configured for Traefik reverse proxy:
 - **FluentValidation** - Request validation
 - **Hangfire** - Background jobs
 - **Serilog** - Logging
-- **BCrypt.Net** - API key hashing
+- **BCrypt.Net** - Password & API key hashing
+- **JWT** - Web authentication
 - **Scalar** - API documentation (available at `/scalar/v1` in development)
+
+### Frontend (Web Panel)
+- **Next.js 15** - React framework with App Router
+- **React 19** - UI library
+- **Tailwind CSS** - Styling
+- **TanStack Query** - Data fetching & caching
+- **Zustand** - State management
+- **Recharts** - Usage charts
+- **Lucide React** - Icons
+- **TypeScript** - Type safety
+
+## License
+
+MIT

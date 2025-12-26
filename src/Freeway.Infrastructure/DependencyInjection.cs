@@ -87,6 +87,9 @@ public static class DependencyInjection
         services.AddScoped<IProviderBenchmarkJob, ProviderBenchmarkJob>();
         services.AddScoped<IModelValidationJob, ModelValidationJob>();
 
+        // Register auth service
+        services.AddScoped<IAuthService, AuthService>();
+
         // Register IModelFetcher collection (providers that can fetch their models)
         services.AddSingleton<IEnumerable<IModelFetcher>>(sp =>
             sp.GetServices<IAiProvider>().OfType<IModelFetcher>().ToList());

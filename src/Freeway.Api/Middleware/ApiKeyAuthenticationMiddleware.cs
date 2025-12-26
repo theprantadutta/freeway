@@ -18,7 +18,9 @@ public class ApiKeyAuthenticationMiddleware
     // Paths that never require authentication
     private static readonly string[] PublicPathPrefixes = new[]
     {
-        "/health"
+        "/health",
+        "/auth/login",
+        "/auth/register"
     };
 
     // Paths that are public only in development
@@ -28,7 +30,7 @@ public class ApiKeyAuthenticationMiddleware
         "/scalar"
     };
 
-    public async Task InvokeAsync(HttpContext context, IProjectCacheService projectCacheService)
+    public async Task InvokeAsync(HttpContext context, IProjectCacheService projectCacheService, IAuthService authService)
     {
         var path = context.Request.Path.Value?.ToLowerInvariant() ?? "";
 
@@ -55,12 +57,44 @@ public class ApiKeyAuthenticationMiddleware
             return;
         }
 
+        // Try JWT Bearer token first
+        var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
+        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            var token = authHeader.Substring("Bearer ".Length).Trim();
+            var userId = authService.ValidateJwtToken(token);
+
+            if (userId.HasValue)
+            {
+                var user = await authService.GetUserByIdAsync(userId.Value);
+                if (user != null && user.IsActive)
+                {
+                    var claims = new[]
+                    {
+                        new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                        new Claim(ClaimTypes.Name, user.Username),
+                        new Claim("auth_type", "user"),
+                        new Claim(ClaimTypes.Role, "admin") // Web users have admin access
+                    };
+                    var identity = new ClaimsIdentity(claims, "Bearer");
+                    context.User = new ClaimsPrincipal(identity);
+                    await _next(context);
+                    return;
+                }
+            }
+
+            context.Response.StatusCode = 401;
+            await context.Response.WriteAsJsonAsync(new { detail = "Invalid or expired token" });
+            return;
+        }
+
+        // Try API key
         var apiKey = context.Request.Headers["X-Api-Key"].FirstOrDefault();
 
         if (string.IsNullOrEmpty(apiKey))
         {
             context.Response.StatusCode = 401;
-            await context.Response.WriteAsJsonAsync(new { detail = "API key is required" });
+            await context.Response.WriteAsJsonAsync(new { detail = "Authentication required. Provide X-Api-Key header or Bearer token." });
             return;
         }
 

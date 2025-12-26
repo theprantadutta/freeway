@@ -13,6 +13,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<UsageLog> UsageLogs => Set<UsageLog>();
     public DbSet<ProviderBenchmark> ProviderBenchmarks => Set<ProviderBenchmark>();
+    public DbSet<User> Users => Set<User>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

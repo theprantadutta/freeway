@@ -8,6 +8,7 @@ public interface IAppDbContext
     DbSet<Project> Projects { get; }
     DbSet<UsageLog> UsageLogs { get; }
     DbSet<ProviderBenchmark> ProviderBenchmarks { get; }
+    DbSet<User> Users { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
