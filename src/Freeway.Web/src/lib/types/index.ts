@@ -57,17 +57,15 @@ export interface RotateKeyResult {
 
 // Model types
 export interface ModelInfo {
-  id: string;
-  name: string;
+  model_id: string;
+  model_name: string;
   description?: string;
   context_length: number;
   pricing: {
-    prompt: number;
-    completion: number;
+    prompt: string;
+    completion: string;
   };
-  top_provider?: {
-    max_completion_tokens?: number;
-  };
+  rank?: number;
 }
 
 export interface SelectedModel {

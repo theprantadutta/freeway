@@ -73,7 +73,8 @@ export default function ModelsPage() {
     const q = search.toLowerCase();
     return freeModels.filter(
       (m) =>
-        m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
+        m.model_id.toLowerCase().includes(q) ||
+        m.model_name.toLowerCase().includes(q)
     );
   }, [freeModels, search]);
 
@@ -83,7 +84,8 @@ export default function ModelsPage() {
     const q = search.toLowerCase();
     return paidModels.filter(
       (m) =>
-        m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
+        m.model_id.toLowerCase().includes(q) ||
+        m.model_name.toLowerCase().includes(q)
     );
   }, [paidModels, search]);
 
@@ -97,7 +99,7 @@ export default function ModelsPage() {
 
   const isLoading = activeTab === "free" ? loadingFree : loadingPaid;
   const models = activeTab === "free" ? filteredFree : filteredPaid;
-  const selectedId =
+  const selectedModelId =
     activeTab === "free" ? selectedFree?.model_id : selectedPaid?.model_id;
   const isMutating =
     activeTab === "free" ? setFreeMutation.isPending : setPaidMutation.isPending;
@@ -147,10 +149,10 @@ export default function ModelsPage() {
           <div className="grid gap-4">
             {models.map((model) => (
               <ModelCard
-                key={model.id}
+                key={model.model_id}
                 model={model}
-                isSelected={model.id === selectedId}
-                onSelect={() => handleSelectModel(model.id)}
+                isSelected={model.model_id === selectedModelId}
+                onSelect={() => handleSelectModel(model.model_id)}
                 isLoading={isMutating}
                 type={activeTab as "free" | "paid"}
               />
@@ -177,7 +179,7 @@ function ModelCard({
   isLoading,
   type,
 }: ModelCardProps) {
-  const shortName = model.id.split("/").pop() || model.id;
+  const shortName = model.model_id.split("/").pop() || model.model_id;
 
   return (
     <Card hover className={isSelected ? "ring-2 ring-primary-500" : ""}>
@@ -202,7 +204,7 @@ function ModelCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-medium text-gray-900 dark:text-gray-100">
-                {model.name || shortName}
+                {model.model_name || shortName}
               </h3>
               {isSelected && (
                 <Badge variant="success">
@@ -213,7 +215,7 @@ function ModelCard({
             </div>
 
             <p className="text-sm text-gray-500 dark:text-gray-400 font-mono truncate mt-0.5">
-              {model.id}
+              {model.model_id}
             </p>
 
             <div className="flex flex-wrap gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400">
@@ -221,11 +223,11 @@ function ModelCard({
               {model.pricing && (
                 <>
                   <span>
-                    Input: {formatCurrency(model.pricing.prompt * 1000000, 2)}/M
+                    Input: {formatCurrency(parseFloat(model.pricing.prompt) * 1000000, 2)}/M
                   </span>
                   <span>
                     Output:{" "}
-                    {formatCurrency(model.pricing.completion * 1000000, 2)}/M
+                    {formatCurrency(parseFloat(model.pricing.completion) * 1000000, 2)}/M
                   </span>
                 </>
               )}

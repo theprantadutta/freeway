@@ -50,7 +50,8 @@ export function formatRelativeTime(date: string | Date): string {
   return formatDate(d);
 }
 
-export function getModelShortName(modelId: string): string {
+export function getModelShortName(modelId: string | undefined | null): string {
+  if (!modelId) return "Unknown";
   const parts = modelId.split("/");
   return parts.length > 1 ? parts[parts.length - 1] : modelId;
 }
