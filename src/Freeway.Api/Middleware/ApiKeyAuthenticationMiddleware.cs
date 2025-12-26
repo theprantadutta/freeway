@@ -69,13 +69,18 @@ public class ApiKeyAuthenticationMiddleware
                 var user = await authService.GetUserByIdAsync(userId.Value);
                 if (user != null && user.IsActive)
                 {
-                    var claims = new[]
+                    var claims = new List<Claim>
                     {
                         new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                        new Claim(ClaimTypes.Name, user.Username),
-                        new Claim("auth_type", "user"),
-                        new Claim(ClaimTypes.Role, "admin") // Web users have admin access
+                        new Claim(ClaimTypes.Email, user.Email),
+                        new Claim(ClaimTypes.Name, user.Name ?? user.Email),
+                        new Claim("is_admin", user.IsAdmin.ToString().ToLower()),
+                        new Claim("auth_type", "user")
                     };
+                    if (user.IsAdmin)
+                    {
+                        claims.Add(new Claim(ClaimTypes.Role, "admin"));
+                    }
                     var identity = new ClaimsIdentity(claims, "Bearer");
                     context.User = new ClaimsPrincipal(identity);
                     await _next(context);

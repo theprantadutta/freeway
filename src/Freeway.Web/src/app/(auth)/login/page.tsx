@@ -13,12 +13,11 @@ export default function LoginPage() {
   const router = useRouter();
   const setAuth = useAuthStore((state) => state.setAuth);
 
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
-  const [isRegister, setIsRegister] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,19 +25,12 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const response = isRegister
-        ? await authApi.register({ username, password })
-        : await authApi.login({ username, password });
-
+      const response = await authApi.login({ email, password });
       setAuth(response.token, response.user, response.expires_at);
       router.push("/");
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : isRegister
-          ? "Registration failed"
-          : "Invalid username or password"
+        err instanceof Error ? err.message : "Invalid email or password"
       );
     } finally {
       setIsLoading(false);
@@ -57,20 +49,20 @@ export default function LoginPage() {
             Freeway
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {isRegister ? "Create your account" : "Sign in to your account"}
+            Sign in to your account
           </p>
         </div>
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <Input
-            label="Username"
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter your username"
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Enter your email"
             required
-            autoComplete="username"
+            autoComplete="email"
           />
 
           <div className="relative">
@@ -81,7 +73,7 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter your password"
               required
-              autoComplete={isRegister ? "new-password" : "current-password"}
+              autoComplete="current-password"
             />
             <button
               type="button"
@@ -108,24 +100,9 @@ export default function LoginPage() {
             size="lg"
             isLoading={isLoading}
           >
-            {isRegister ? "Create Account" : "Sign In"}
+            Sign In
           </Button>
         </form>
-
-        {/* Toggle */}
-        <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
-          {isRegister ? "Already have an account?" : "Don't have an account?"}{" "}
-          <button
-            type="button"
-            onClick={() => {
-              setIsRegister(!isRegister);
-              setError("");
-            }}
-            className="text-primary-600 dark:text-primary-400 font-medium hover:underline"
-          >
-            {isRegister ? "Sign in" : "Register"}
-          </button>
-        </p>
       </CardContent>
     </Card>
   );

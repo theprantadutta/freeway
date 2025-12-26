@@ -16,9 +16,9 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasColumnName("id")
             .HasDefaultValueSql("gen_random_uuid()");
 
-        builder.Property(u => u.Username)
-            .HasColumnName("username")
-            .HasMaxLength(100)
+        builder.Property(u => u.Email)
+            .HasColumnName("email")
+            .HasMaxLength(255)
             .IsRequired();
 
         builder.Property(u => u.PasswordHash)
@@ -26,9 +26,13 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasMaxLength(255)
             .IsRequired();
 
-        builder.Property(u => u.Email)
-            .HasColumnName("email")
-            .HasMaxLength(255);
+        builder.Property(u => u.Name)
+            .HasColumnName("name")
+            .HasMaxLength(100);
+
+        builder.Property(u => u.IsAdmin)
+            .HasColumnName("is_admin")
+            .HasDefaultValue(false);
 
         builder.Property(u => u.CreatedAt)
             .HasColumnName("created_at")
@@ -46,12 +50,9 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasColumnName("last_login_at");
 
         // Indexes
-        builder.HasIndex(u => u.Username)
-            .HasDatabaseName("ix_users_username")
-            .IsUnique();
-
         builder.HasIndex(u => u.Email)
-            .HasDatabaseName("ix_users_email");
+            .HasDatabaseName("ix_users_email")
+            .IsUnique();
 
         builder.HasIndex(u => u.IsActive)
             .HasDatabaseName("ix_users_is_active");

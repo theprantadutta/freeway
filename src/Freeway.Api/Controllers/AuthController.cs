@@ -1,5 +1,7 @@
 using System.Security.Claims;
+using Freeway.Api.Attributes;
 using Freeway.Application.DTOs;
+using Freeway.Domain.Entities;
 using Freeway.Domain.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -23,15 +25,15 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
         {
-            return BadRequest(new { detail = "Username and password are required" });
+            return BadRequest(new { detail = "Email and password are required" });
         }
 
-        var user = await _authService.ValidateCredentialsAsync(request.Username, request.Password);
+        var user = await _authService.ValidateCredentialsAsync(request.Email, request.Password);
         if (user == null)
         {
-            return Unauthorized(new { detail = "Invalid username or password" });
+            return Unauthorized(new { detail = "Invalid email or password" });
         }
 
         // Update last login
@@ -44,78 +46,12 @@ public class AuthController : ControllerBase
         var response = new LoginResponse
         {
             Token = token,
-            User = new UserDto
-            {
-                Id = user.Id,
-                Username = user.Username,
-                Email = user.Email,
-                CreatedAt = user.CreatedAt,
-                IsActive = user.IsActive,
-                LastLoginAt = user.LastLoginAt
-            },
+            User = MapToDto(user),
             ExpiresAt = DateTime.UtcNow.AddHours(expiryHours)
         };
 
-        _logger.LogInformation("User {Username} logged in successfully", user.Username);
+        _logger.LogInformation("User {Email} logged in successfully", user.Email);
         return Ok(response);
-    }
-
-    [HttpPost("register")]
-    [AllowAnonymous]
-    public async Task<ActionResult<LoginResponse>> Register([FromBody] RegisterRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
-        {
-            return BadRequest(new { detail = "Username and password are required" });
-        }
-
-        if (request.Password.Length < 8)
-        {
-            return BadRequest(new { detail = "Password must be at least 8 characters" });
-        }
-
-        // Check if this is the first user (allow registration) or if registration is restricted
-        var userCount = await _authService.GetUserCountAsync();
-        if (userCount > 0)
-        {
-            // Only allow registration if the request comes from an authenticated admin
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null)
-            {
-                return Unauthorized(new { detail = "Registration is restricted. Please contact an administrator." });
-            }
-        }
-
-        // Check if username already exists
-        if (await _authService.UsernameExistsAsync(request.Username))
-        {
-            return BadRequest(new { detail = "Username already exists" });
-        }
-
-        // Create user
-        var user = await _authService.CreateUserAsync(request.Username, request.Password, request.Email);
-
-        // Generate JWT
-        var token = _authService.GenerateJwtToken(user);
-        var expiryHours = int.Parse(HttpContext.RequestServices.GetRequiredService<IConfiguration>()["JWT_EXPIRY_HOURS"] ?? "24");
-
-        var response = new LoginResponse
-        {
-            Token = token,
-            User = new UserDto
-            {
-                Id = user.Id,
-                Username = user.Username,
-                Email = user.Email,
-                CreatedAt = user.CreatedAt,
-                IsActive = user.IsActive,
-                LastLoginAt = user.LastLoginAt
-            },
-            ExpiresAt = DateTime.UtcNow.AddHours(expiryHours)
-        };
-
-        _logger.LogInformation("New user registered: {Username}", user.Username);
-        return StatusCode(201, response);
     }
 
     [HttpGet("me")]
@@ -133,15 +69,7 @@ public class AuthController : ControllerBase
             return NotFound(new { detail = "User not found" });
         }
 
-        return Ok(new UserDto
-        {
-            Id = user.Id,
-            Username = user.Username,
-            Email = user.Email,
-            CreatedAt = user.CreatedAt,
-            IsActive = user.IsActive,
-            LastLoginAt = user.LastLoginAt
-        });
+        return Ok(MapToDto(user));
     }
 
     [HttpPost("change-password")]
@@ -174,4 +102,101 @@ public class AuthController : ControllerBase
         // The client should delete the token
         return Ok(new { message = "Logged out successfully" });
     }
+
+    // ==================== Admin-only User Management ====================
+
+    [HttpGet("users")]
+    [RequireAdmin]
+    public async Task<ActionResult<List<UserDto>>> GetAllUsers()
+    {
+        var users = await _authService.GetAllUsersAsync();
+        return Ok(users.Select(MapToDto).ToList());
+    }
+
+    [HttpPost("users")]
+    [RequireAdmin]
+    public async Task<ActionResult<UserDto>> CreateUser([FromBody] CreateUserRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+        {
+            return BadRequest(new { detail = "Email and password are required" });
+        }
+
+        if (request.Password.Length < 8)
+        {
+            return BadRequest(new { detail = "Password must be at least 8 characters" });
+        }
+
+        if (await _authService.EmailExistsAsync(request.Email))
+        {
+            return BadRequest(new { detail = "Email already exists" });
+        }
+
+        var user = await _authService.CreateUserAsync(request.Email, request.Password, request.Name, request.IsAdmin);
+
+        _logger.LogInformation("Admin created new user: {Email}", user.Email);
+        return StatusCode(201, MapToDto(user));
+    }
+
+    [HttpGet("users/{id:guid}")]
+    [RequireAdmin]
+    public async Task<ActionResult<UserDto>> GetUser(Guid id)
+    {
+        var user = await _authService.GetUserByIdAsync(id);
+        if (user == null)
+        {
+            return NotFound(new { detail = "User not found" });
+        }
+
+        return Ok(MapToDto(user));
+    }
+
+    [HttpPatch("users/{id:guid}")]
+    [RequireAdmin]
+    public async Task<ActionResult<UserDto>> UpdateUser(Guid id, [FromBody] UpdateUserRequest request)
+    {
+        var user = await _authService.UpdateUserAsync(id, request.Name, request.Email, request.IsActive, request.IsAdmin);
+        if (user == null)
+        {
+            return NotFound(new { detail = "User not found" });
+        }
+
+        _logger.LogInformation("Admin updated user: {Email}", user.Email);
+        return Ok(MapToDto(user));
+    }
+
+    [HttpDelete("users/{id:guid}")]
+    [RequireAdmin]
+    public async Task<ActionResult> DeleteUser(Guid id)
+    {
+        // Prevent self-deletion
+        var currentUserIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+        if (currentUserIdClaim != null && Guid.TryParse(currentUserIdClaim.Value, out var currentUserId))
+        {
+            if (currentUserId == id)
+            {
+                return BadRequest(new { detail = "Cannot delete your own account" });
+            }
+        }
+
+        var success = await _authService.DeleteUserAsync(id);
+        if (!success)
+        {
+            return NotFound(new { detail = "User not found" });
+        }
+
+        _logger.LogInformation("Admin deleted user: {UserId}", id);
+        return NoContent();
+    }
+
+    private static UserDto MapToDto(User user) => new()
+    {
+        Id = user.Id,
+        Email = user.Email,
+        Name = user.Name,
+        IsAdmin = user.IsAdmin,
+        CreatedAt = user.CreatedAt,
+        IsActive = user.IsActive,
+        LastLoginAt = user.LastLoginAt
+    };
 }

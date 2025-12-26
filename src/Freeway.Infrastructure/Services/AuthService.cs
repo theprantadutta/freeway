@@ -26,36 +26,37 @@ public class AuthService : IAuthService
         _logger = logger;
     }
 
-    public async Task<User?> ValidateCredentialsAsync(string username, string password)
+    public async Task<User?> ValidateCredentialsAsync(string email, string password)
     {
         var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Username.ToLower() == username.ToLower() && u.IsActive);
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower() && u.IsActive);
 
         if (user == null)
         {
-            _logger.LogWarning("Login attempt for non-existent user: {Username}", username);
+            _logger.LogWarning("Login attempt for non-existent user: {Email}", email);
             return null;
         }
 
         if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
         {
-            _logger.LogWarning("Invalid password for user: {Username}", username);
+            _logger.LogWarning("Invalid password for user: {Email}", email);
             return null;
         }
 
         return user;
     }
 
-    public async Task<User> CreateUserAsync(string username, string password, string? email = null)
+    public async Task<User> CreateUserAsync(string email, string password, string? name = null, bool isAdmin = false)
     {
         var passwordHash = BCrypt.Net.BCrypt.HashPassword(password);
 
         var user = new User
         {
             Id = Guid.NewGuid(),
-            Username = username,
-            PasswordHash = passwordHash,
             Email = email,
+            PasswordHash = passwordHash,
+            Name = name,
+            IsAdmin = isAdmin,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             IsActive = true
@@ -64,7 +65,7 @@ public class AuthService : IAuthService
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
 
-        _logger.LogInformation("Created new user: {Username}", username);
+        _logger.LogInformation("Created new user: {Email} (Admin: {IsAdmin})", email, isAdmin);
         return user;
     }
 
@@ -73,19 +74,19 @@ public class AuthService : IAuthService
         return await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
     }
 
-    public async Task<User?> GetUserByUsernameAsync(string username)
+    public async Task<User?> GetUserByEmailAsync(string email)
     {
-        return await _context.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == username.ToLower());
+        return await _context.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower());
     }
 
-    public async Task<bool> UsernameExistsAsync(string username)
+    public async Task<bool> EmailExistsAsync(string email)
     {
-        return await _context.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower());
+        return await _context.Users.AnyAsync(u => u.Email.ToLower() == email.ToLower());
     }
 
-    public async Task<int> GetUserCountAsync()
+    public async Task<List<User>> GetAllUsersAsync()
     {
-        return await _context.Users.CountAsync();
+        return await _context.Users.OrderBy(u => u.Email).ToListAsync();
     }
 
     public async Task UpdateLastLoginAsync(Guid userId)
@@ -112,8 +113,64 @@ public class AuthService : IAuthService
         user.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
 
-        _logger.LogInformation("Password changed for user: {Username}", user.Username);
+        _logger.LogInformation("Password changed for user: {Email}", user.Email);
         return true;
+    }
+
+    public async Task<User?> UpdateUserAsync(Guid userId, string? name, string? email, bool? isActive, bool? isAdmin)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+            return null;
+
+        if (name != null)
+            user.Name = name;
+        if (email != null)
+            user.Email = email;
+        if (isActive.HasValue)
+            user.IsActive = isActive.Value;
+        if (isAdmin.HasValue)
+            user.IsAdmin = isAdmin.Value;
+
+        user.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Updated user: {Email}", user.Email);
+        return user;
+    }
+
+    public async Task<bool> DeleteUserAsync(Guid userId)
+    {
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+            return false;
+
+        _context.Users.Remove(user);
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Deleted user: {Email}", user.Email);
+        return true;
+    }
+
+    public async Task SeedDefaultAdminAsync()
+    {
+        var adminEmail = _configuration["DEFAULT_ADMIN_EMAIL"];
+        var adminPassword = _configuration["DEFAULT_ADMIN_PASSWORD"];
+
+        if (string.IsNullOrEmpty(adminEmail) || string.IsNullOrEmpty(adminPassword))
+        {
+            _logger.LogWarning("DEFAULT_ADMIN_EMAIL or DEFAULT_ADMIN_PASSWORD not configured, skipping admin seeding");
+            return;
+        }
+
+        if (await EmailExistsAsync(adminEmail))
+        {
+            _logger.LogInformation("Admin user already exists: {Email}", adminEmail);
+            return;
+        }
+
+        await CreateUserAsync(adminEmail, adminPassword, "Admin", isAdmin: true);
+        _logger.LogInformation("Seeded default admin user: {Email}", adminEmail);
     }
 
     public string GenerateJwtToken(User user)
@@ -128,7 +185,9 @@ public class AuthService : IAuthService
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Name, user.Username),
+            new Claim(ClaimTypes.Email, user.Email),
+            new Claim(ClaimTypes.Name, user.Name ?? user.Email),
+            new Claim("is_admin", user.IsAdmin.ToString().ToLower()),
             new Claim("auth_type", "user"),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };

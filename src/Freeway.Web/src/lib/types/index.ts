@@ -1,15 +1,16 @@
 // Auth types
 export interface User {
   id: string;
-  username: string;
-  email?: string;
+  email: string;
+  name?: string;
+  is_admin: boolean;
   created_at: string;
   is_active: boolean;
   last_login_at?: string;
 }
 
 export interface LoginRequest {
-  username: string;
+  email: string;
   password: string;
 }
 
@@ -17,12 +18,6 @@ export interface LoginResponse {
   token: string;
   user: User;
   expires_at: string;
-}
-
-export interface RegisterRequest {
-  username: string;
-  password: string;
-  email?: string;
 }
 
 // Project types

@@ -109,12 +109,16 @@ try
 
     var app = builder.Build();
 
-    // Initialize caches on startup
+    // Initialize caches and seed admin on startup
     using (var scope = app.Services.CreateScope())
     {
         var modelCacheService = scope.ServiceProvider.GetRequiredService<IModelCacheService>();
         var projectCacheService = scope.ServiceProvider.GetRequiredService<IProjectCacheService>();
         var modelValidationJob = scope.ServiceProvider.GetRequiredService<IModelValidationJob>();
+        var authService = scope.ServiceProvider.GetRequiredService<IAuthService>();
+
+        Log.Information("Seeding default admin user...");
+        await authService.SeedDefaultAdminAsync();
 
         Log.Information("Initializing model cache...");
         await modelCacheService.RefreshModelsAsync();

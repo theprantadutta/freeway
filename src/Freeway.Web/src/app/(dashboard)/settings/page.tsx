@@ -16,7 +16,9 @@ import {
   LogOut,
   Zap,
   Info,
+  Shield,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
 import { formatDateTime } from "@/lib/utils/format";
 
@@ -49,14 +51,20 @@ export default function SettingsPage() {
                   <User className="h-6 w-6 text-primary-600 dark:text-primary-400" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-medium text-gray-900 dark:text-gray-100">
-                    {user?.username}
-                  </h3>
-                  {user?.email && (
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                      {user.email}
-                    </p>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium text-gray-900 dark:text-gray-100">
+                      {user?.name || user?.email}
+                    </h3>
+                    {user?.is_admin && (
+                      <Badge variant="warning" className="text-xs">
+                        <Shield className="h-3 w-3 mr-1" />
+                        Admin
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                    {user?.email}
+                  </p>
                   <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">
                     <p>Member since: {user?.created_at ? formatDateTime(user.created_at) : "N/A"}</p>
                     {user?.last_login_at && (
