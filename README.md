@@ -456,7 +456,7 @@ The included `compose.yml` is configured for Traefik reverse proxy:
 | Service | Domain | Port |
 |---------|--------|------|
 | API | `freeway.pranta.dev` | 8080 |
-| Web Panel | `freewayapp.pranta.dev` | 3000 |
+| Web Panel | `freewayapp.pranta.dev` | 3243 |
 
 Features:
 - TLS: Automatic via Let's Encrypt
