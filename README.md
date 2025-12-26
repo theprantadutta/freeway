@@ -313,7 +313,7 @@ docker compose down
 
 Services will be available at:
 - API: `https://freeway.pranta.dev` (configure in compose.yml)
-- Web Panel: `https://app.freeway.pranta.dev` (configure in compose.yml)
+- Web Panel: `https://freewayapp.pranta.dev` (configure in compose.yml)
 
 ## Project Structure
 
@@ -456,7 +456,7 @@ The included `compose.yml` is configured for Traefik reverse proxy:
 | Service | Domain | Port |
 |---------|--------|------|
 | API | `freeway.pranta.dev` | 8080 |
-| Web Panel | `app.freeway.pranta.dev` | 3000 |
+| Web Panel | `freewayapp.pranta.dev` | 3000 |
 
 Features:
 - TLS: Automatic via Let's Encrypt

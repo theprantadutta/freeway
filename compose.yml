@@ -38,7 +38,7 @@ services:
       - proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.freeway-web.rule=Host(`app.freeway.pranta.dev`)"
+      - "traefik.http.routers.freeway-web.rule=Host(`freewayapp.pranta.dev`)"
       - "traefik.http.routers.freeway-web.entrypoints=websecure"
       - "traefik.http.routers.freeway-web.tls.certresolver=letsencrypt"
       - "traefik.http.services.freeway-web.loadbalancer.server.port=3000"
