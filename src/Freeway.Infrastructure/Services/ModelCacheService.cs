@@ -11,8 +11,10 @@ public class ModelCacheService : IModelCacheService
 
     private List<CachedModel> _freeModels = new();
     private List<CachedModel> _paidModels = new();
+    private List<CachedModel> _imageModels = new();
     private CachedModel? _selectedFreeModel;
     private CachedModel? _selectedPaidModel;
+    private CachedModel? _selectedImageModel;
     private DateTime? _lastUpdated;
 
     public ModelCacheService(IOpenRouterService openRouterService, ILogger<ModelCacheService> logger)
@@ -53,12 +55,29 @@ public class ModelCacheService : IModelCacheService
         }
     }
 
+    public List<CachedModel> GetImageModels()
+    {
+        lock (_lock)
+        {
+            return _imageModels.ToList();
+        }
+    }
+
+    public CachedModel? GetSelectedImageModel()
+    {
+        lock (_lock)
+        {
+            return _selectedImageModel;
+        }
+    }
+
     public CachedModel? GetModelById(string modelId)
     {
         lock (_lock)
         {
             return _freeModels.FirstOrDefault(m => m.Id == modelId)
-                   ?? _paidModels.FirstOrDefault(m => m.Id == modelId);
+                   ?? _paidModels.FirstOrDefault(m => m.Id == modelId)
+                   ?? _imageModels.FirstOrDefault(m => m.Id == modelId);
         }
     }
 
@@ -84,6 +103,19 @@ public class ModelCacheService : IModelCacheService
             {
                 _selectedPaidModel = model;
                 _logger.LogInformation("Selected paid model set to: {ModelId}", modelId);
+            }
+        }
+    }
+
+    public void SetSelectedImageModel(string modelId)
+    {
+        lock (_lock)
+        {
+            var model = _imageModels.FirstOrDefault(m => m.Id == modelId);
+            if (model != null)
+            {
+                _selectedImageModel = model;
+                _logger.LogInformation("Selected image model set to: {ModelId}", modelId);
             }
         }
     }
@@ -149,10 +181,29 @@ public class ModelCacheService : IModelCacheService
                 .Select((m, i) => { m.Rank = i + 1; return m; })
                 .ToList();
 
+            // Fetch image models
+            var imageModelsRaw = await _openRouterService.GetImageModelsAsync(cancellationToken);
+            var imageModels = imageModelsRaw
+                .Select(m => new CachedModel
+                {
+                    Id = m.Id,
+                    Name = m.Name,
+                    Description = m.Description,
+                    ContextLength = m.ContextLength,
+                    PromptPrice = m.Pricing.Prompt,
+                    CompletionPrice = m.Pricing.Completion,
+                    IsFree = false,
+                    IsImageModel = true
+                })
+                .OrderBy(m => GetTotalPrice(m))
+                .Select((m, i) => { m.Rank = i + 1; return m; })
+                .ToList();
+
             lock (_lock)
             {
                 _freeModels = freeModels;
                 _paidModels = paidModels;
+                _imageModels = imageModels;
                 _lastUpdated = DateTime.UtcNow;
 
                 // Auto-select best free model (largest context)
@@ -176,10 +227,21 @@ public class ModelCacheService : IModelCacheService
                             _selectedPaidModel.Id, GetTotalPrice(_selectedPaidModel));
                     }
                 }
+
+                // Auto-select cheapest image model (only on first load)
+                if (_selectedImageModel == null)
+                {
+                    _selectedImageModel = imageModels.FirstOrDefault();
+                    if (_selectedImageModel != null)
+                    {
+                        _logger.LogInformation("Auto-selected cheapest image model: {ModelId} (price: {Price})",
+                            _selectedImageModel.Id, GetTotalPrice(_selectedImageModel));
+                    }
+                }
             }
 
-            _logger.LogInformation("Model cache refreshed: {FreeCount} free, {PaidCount} paid models",
-                freeModels.Count, paidModels.Count);
+            _logger.LogInformation("Model cache refreshed: {FreeCount} free, {PaidCount} paid, {ImageCount} image models",
+                freeModels.Count, paidModels.Count, imageModels.Count);
         }
         catch (Exception ex)
         {

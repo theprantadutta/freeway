@@ -53,6 +53,28 @@ public class OpenRouterService : IOpenRouterService
         }
     }
 
+    public async Task<List<OpenRouterModel>> GetImageModelsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(_requestTimeout));
+
+            var response = await _httpClient.GetAsync("https://openrouter.ai/api/v1/models?output_modalities=image", cts.Token);
+            response.EnsureSuccessStatusCode();
+
+            var content = await response.Content.ReadAsStringAsync(cts.Token);
+            var modelsResponse = JsonSerializer.Deserialize<OpenRouterModelsResponse>(content, JsonOptions);
+
+            return modelsResponse?.Data ?? new List<OpenRouterModel>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch image models from OpenRouter");
+            return new List<OpenRouterModel>();
+        }
+    }
+
     public async Task<ChatCompletionResult> CreateChatCompletionAsync(
         string modelId,
         List<ChatMessage> messages,

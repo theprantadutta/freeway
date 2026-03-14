@@ -18,8 +18,10 @@ public class GetHealthQueryHandler : IRequestHandler<GetHealthQuery, Result<Heal
     {
         var freeModels = _modelCacheService.GetFreeModels();
         var paidModels = _modelCacheService.GetPaidModels();
+        var imageModels = _modelCacheService.GetImageModels();
         var selectedFree = _modelCacheService.GetSelectedFreeModel();
         var selectedPaid = _modelCacheService.GetSelectedPaidModel();
+        var selectedImage = _modelCacheService.GetSelectedImageModel();
 
         return Task.FromResult(Result<HealthResponseDto>.Success(new HealthResponseDto
         {
@@ -28,8 +30,10 @@ public class GetHealthQueryHandler : IRequestHandler<GetHealthQuery, Result<Heal
             Version = "1.0.0",
             FreeModelsCount = freeModels.Count,
             PaidModelsCount = paidModels.Count,
+            ImageModelsCount = imageModels.Count,
             SelectedFreeModel = selectedFree?.Id,
             SelectedPaidModel = selectedPaid?.Id,
+            SelectedImageModel = selectedImage?.Id,
             LastRefresh = _modelCacheService.GetLastUpdated()
         }));
     }

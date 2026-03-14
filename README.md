@@ -8,18 +8,19 @@ Freeway is a full-featured AI Gateway built with .NET 10 that:
 - Proxies chat completion requests to multiple AI providers (OpenRouter, OpenAI, Gemini, Groq, Mistral, Cohere, HuggingFace)
 - Manages projects with individual API keys
 - Tracks usage, costs, and analytics per project
-- Automatically selects best free and cheapest paid models
+- Automatically selects best free, cheapest paid, and cheapest image generation models
 - Provides a complete admin API for management
 - Includes a modern Next.js web control panel with JWT authentication
 
 ## Features
 
-- **OpenAI-Compatible Chat Endpoint**: `POST /chat/completions` with model selection (`free`, `paid`, or specific model ID)
+- **OpenAI-Compatible Chat Endpoint**: `POST /chat/completions` with model selection (`free`, `paid`, `image`, or specific model ID)
 - **Multi-Provider Support**: Fallback across 8 AI providers for reliability
 - **Project Management**: Create projects with individual API keys, rate limits, and metadata
 - **Usage Tracking**: Logs all requests with tokens, costs, and response times
 - **Admin Analytics**: Usage summaries, per-project stats, and detailed logs
-- **Model Selection**: Auto-selects best free model (by context) and cheapest paid model (by price)
+- **Model Selection**: Auto-selects best free model (by context), cheapest paid model, and cheapest image generation model (by price)
+- **Image Generation**: Supports image generation models via `model: "image"` with auto-selection of cheapest option
 - **Daily Refresh**: Models updated via Hangfire background jobs
 - **PostgreSQL Storage**: Persistent storage for projects, users, and usage data
 - **Web Control Panel**: Next.js 15 dashboard with JWT authentication
@@ -97,6 +98,7 @@ OpenAI-compatible chat completion endpoint.
 **Model options:**
 - `"free"` - Use best free model (auto-selected)
 - `"paid"` - Use cheapest paid model (auto-selected)
+- `"image"` - Use cheapest image generation model (auto-selected)
 - `"<model_id>"` - Use specific model by ID
 
 **Response:**
@@ -125,8 +127,10 @@ OpenAI-compatible chat completion endpoint.
 ```bash
 GET /model/free      # Best free model
 GET /model/paid      # Cheapest paid model
+GET /model/image     # Cheapest image generation model
 GET /models/free     # All free models (ranked by context)
 GET /models/paid     # All paid models (ranked by price)
+GET /models/image    # All image generation models (ranked by price)
 GET /health          # Service health check
 ```
 
@@ -180,8 +184,9 @@ POST   /admin/projects/{id}/rotate-key  # Rotate API key
 #### Model Selection
 
 ```bash
-PUT /admin/model/free   # Set selected free model
-PUT /admin/model/paid   # Set selected paid model
+PUT /admin/model/free    # Set selected free model
+PUT /admin/model/paid    # Set selected paid model
+PUT /admin/model/image   # Set selected image generation model
 ```
 
 **Request:**
@@ -366,14 +371,14 @@ The Next.js web panel provides:
 
 ### Dashboard
 - Stats overview: Total projects, active projects, requests today, monthly cost
-- Selected models display (free and paid)
+- Selected models display (free, paid, and image)
 - Quick navigation to all features
 
 ### Models
-- Browse all available models (free and paid tabs)
+- Browse all available models (free, paid, and image tabs)
 - Search models by name or ID
 - View model details (context length, pricing, capabilities)
-- Select active free/paid models
+- Select active free/paid/image models
 
 ### Projects
 - Create, edit, and delete projects
@@ -478,10 +483,12 @@ To customize domains, edit the Traefik labels in `compose.yml`.
 2. **Model categorization**:
    - Free models: Have `:free` suffix or zero pricing
    - Paid models: Everything else (filtered for valid pricing)
+   - Image models: Fetched from OpenRouter with `?output_modalities=image`
 
 3. **Model selection**:
    - Free: Best = largest context length
    - Paid: Best = lowest combined price
+   - Image: Best = lowest price from image generation models
 
 4. **Background jobs**:
    - Hangfire runs daily refresh at midnight UTC
@@ -490,7 +497,7 @@ To customize domains, edit the Traefik labels in `compose.yml`.
 
 5. **Request flow**:
    - Authentication validated (API key or JWT)
-   - Model resolved (free/paid/specific)
+   - Model resolved (free/paid/image/specific)
    - Request proxied to appropriate provider
    - Usage logged to database
 

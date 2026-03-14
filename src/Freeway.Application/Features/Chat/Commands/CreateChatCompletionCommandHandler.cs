@@ -142,11 +142,18 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             return (model?.Id, "paid", model, null);
         }
 
+        if (requestedModel.Equals("image", StringComparison.OrdinalIgnoreCase))
+        {
+            var model = _modelCacheService.GetSelectedImageModel();
+            return (model?.Id, "image", model, null);
+        }
+
         // Look up specific model in legacy cache (OpenRouter models)
         var cachedModel = _modelCacheService.GetModelById(requestedModel);
         if (cachedModel != null)
         {
-            return (cachedModel.Id, cachedModel.IsFree ? "free" : "paid", cachedModel, null);
+            var type = cachedModel.IsImageModel ? "image" : cachedModel.IsFree ? "free" : "paid";
+            return (cachedModel.Id, type, cachedModel, null);
         }
 
         // Check provider model cache for strict validation

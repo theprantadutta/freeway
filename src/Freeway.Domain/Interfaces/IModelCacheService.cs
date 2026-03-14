@@ -4,11 +4,14 @@ public interface IModelCacheService
 {
     List<CachedModel> GetFreeModels();
     List<CachedModel> GetPaidModels();
+    List<CachedModel> GetImageModels();
     CachedModel? GetSelectedFreeModel();
     CachedModel? GetSelectedPaidModel();
+    CachedModel? GetSelectedImageModel();
     CachedModel? GetModelById(string modelId);
     void SetSelectedFreeModel(string modelId);
     void SetSelectedPaidModel(string modelId);
+    void SetSelectedImageModel(string modelId);
     Task RefreshModelsAsync(CancellationToken cancellationToken = default);
     DateTime? GetLastUpdated();
 }
@@ -22,5 +25,6 @@ public class CachedModel
     public string PromptPrice { get; set; } = "0";
     public string CompletionPrice { get; set; } = "0";
     public bool IsFree { get; set; }
+    public bool IsImageModel { get; set; }
     public int Rank { get; set; }
 }

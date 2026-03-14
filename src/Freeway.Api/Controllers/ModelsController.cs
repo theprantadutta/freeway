@@ -33,6 +33,20 @@ public class ModelsController : BaseApiController
         return HandleResult(result);
     }
 
+    [HttpGet("/model/image")]
+    public async Task<ActionResult> GetSelectedImageModel()
+    {
+        var result = await Mediator.Send(new GetSelectedImageModelQuery());
+        return HandleResult(result);
+    }
+
+    [HttpGet("/models/image")]
+    public async Task<ActionResult> GetImageModels()
+    {
+        var result = await Mediator.Send(new GetImageModelsQuery());
+        return HandleResult(result);
+    }
+
     /// <summary>
     /// Get all models from all providers
     /// </summary>

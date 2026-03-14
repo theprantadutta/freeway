@@ -5,6 +5,7 @@ namespace Freeway.Domain.Interfaces;
 public interface IOpenRouterService
 {
     Task<List<OpenRouterModel>> GetModelsAsync(CancellationToken cancellationToken = default);
+    Task<List<OpenRouterModel>> GetImageModelsAsync(CancellationToken cancellationToken = default);
     Task<ChatCompletionResult> CreateChatCompletionAsync(
         string modelId,
         List<ChatMessage> messages,

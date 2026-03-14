@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Brain, Check, Sparkles } from "lucide-react";
+import { Search, Brain, Check, Sparkles, Image } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,11 @@ export default function ModelsPage() {
     queryFn: () => modelsApi.getPaidModels(),
   });
 
+  const { data: imageModels, isLoading: loadingImage } = useQuery({
+    queryKey: ["models", "image"],
+    queryFn: () => modelsApi.getImageModels(),
+  });
+
   const { data: selectedFree } = useQuery({
     queryKey: ["model", "free"],
     queryFn: () => modelsApi.getSelectedFreeModel(),
@@ -41,6 +46,11 @@ export default function ModelsPage() {
   const { data: selectedPaid } = useQuery({
     queryKey: ["model", "paid"],
     queryFn: () => modelsApi.getSelectedPaidModel(),
+  });
+
+  const { data: selectedImage } = useQuery({
+    queryKey: ["model", "image"],
+    queryFn: () => modelsApi.getSelectedImageModel(),
   });
 
   // Mutations
@@ -63,6 +73,17 @@ export default function ModelsPage() {
     },
     onError: () => {
       toast("Failed to update paid model", "error");
+    },
+  });
+
+  const setImageMutation = useMutation({
+    mutationFn: (modelId: string) => modelsApi.setSelectedImageModel(modelId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["model", "image"] });
+      toast("Image model updated successfully", "success");
+    },
+    onError: () => {
+      toast("Failed to update image model", "error");
     },
   });
 
@@ -89,20 +110,51 @@ export default function ModelsPage() {
     );
   }, [paidModels, search]);
 
+  const filteredImage = useMemo(() => {
+    if (!imageModels) return [];
+    if (!search) return imageModels;
+    const q = search.toLowerCase();
+    return imageModels.filter(
+      (m) =>
+        m.model_id.toLowerCase().includes(q) ||
+        m.model_name.toLowerCase().includes(q)
+    );
+  }, [imageModels, search]);
+
   const handleSelectModel = (modelId: string) => {
     if (activeTab === "free") {
       setFreeMutation.mutate(modelId);
-    } else {
+    } else if (activeTab === "paid") {
       setPaidMutation.mutate(modelId);
+    } else {
+      setImageMutation.mutate(modelId);
     }
   };
 
-  const isLoading = activeTab === "free" ? loadingFree : loadingPaid;
-  const models = activeTab === "free" ? filteredFree : filteredPaid;
+  const isLoading =
+    activeTab === "free"
+      ? loadingFree
+      : activeTab === "paid"
+        ? loadingPaid
+        : loadingImage;
+  const models =
+    activeTab === "free"
+      ? filteredFree
+      : activeTab === "paid"
+        ? filteredPaid
+        : filteredImage;
   const selectedModelId =
-    activeTab === "free" ? selectedFree?.model_id : selectedPaid?.model_id;
+    activeTab === "free"
+      ? selectedFree?.model_id
+      : activeTab === "paid"
+        ? selectedPaid?.model_id
+        : selectedImage?.model_id;
   const isMutating =
-    activeTab === "free" ? setFreeMutation.isPending : setPaidMutation.isPending;
+    activeTab === "free"
+      ? setFreeMutation.isPending
+      : activeTab === "paid"
+        ? setPaidMutation.isPending
+        : setImageMutation.isPending;
 
   return (
     <div className="flex flex-col h-full">
@@ -128,6 +180,7 @@ export default function ModelsPage() {
             <TabsList className="w-full sm:w-auto">
               <TabsTrigger value="free">Free</TabsTrigger>
               <TabsTrigger value="paid">Paid</TabsTrigger>
+              <TabsTrigger value="image">Image</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -154,7 +207,7 @@ export default function ModelsPage() {
                 isSelected={model.model_id === selectedModelId}
                 onSelect={() => handleSelectModel(model.model_id)}
                 isLoading={isMutating}
-                type={activeTab as "free" | "paid"}
+                type={activeTab as "free" | "paid" | "image"}
               />
             ))}
           </div>
@@ -169,7 +222,7 @@ interface ModelCardProps {
   isSelected: boolean;
   onSelect: () => void;
   isLoading: boolean;
-  type: "free" | "paid";
+  type: "free" | "paid" | "image";
 }
 
 function ModelCard({
@@ -189,16 +242,24 @@ function ModelCard({
             className={`p-2.5 rounded-lg ${
               type === "free"
                 ? "bg-green-100 dark:bg-green-900/30"
-                : "bg-purple-100 dark:bg-purple-900/30"
+                : type === "paid"
+                  ? "bg-purple-100 dark:bg-purple-900/30"
+                  : "bg-amber-100 dark:bg-amber-900/30"
             }`}
           >
-            <Brain
-              className={`h-5 w-5 ${
-                type === "free"
-                  ? "text-green-600 dark:text-green-400"
-                  : "text-purple-600 dark:text-purple-400"
-              }`}
-            />
+            {type === "image" ? (
+              <Image
+                className="h-5 w-5 text-amber-600 dark:text-amber-400"
+              />
+            ) : (
+              <Brain
+                className={`h-5 w-5 ${
+                  type === "free"
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-purple-600 dark:text-purple-400"
+                }`}
+              />
+            )}
           </div>
 
           <div className="flex-1 min-w-0">

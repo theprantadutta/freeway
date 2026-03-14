@@ -96,6 +96,13 @@ public class AdminController : BaseApiController
         return HandleResult(result);
     }
 
+    [HttpPut("model/image")]
+    public async Task<ActionResult> SetSelectedImageModel([FromBody] SetModelRequest request)
+    {
+        var result = await Mediator.Send(new SetSelectedImageModelCommand(request.ModelId));
+        return HandleResult(result);
+    }
+
     #endregion
 
     #region Analytics

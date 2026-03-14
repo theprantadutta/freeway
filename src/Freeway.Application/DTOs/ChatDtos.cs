@@ -44,7 +44,9 @@ public class HealthResponseDto
     public string Version { get; set; } = "1.0.0";
     public int FreeModelsCount { get; set; }
     public int PaidModelsCount { get; set; }
+    public int ImageModelsCount { get; set; }
     public string? SelectedFreeModel { get; set; }
     public string? SelectedPaidModel { get; set; }
+    public string? SelectedImageModel { get; set; }
     public DateTime? LastRefresh { get; set; }
 }

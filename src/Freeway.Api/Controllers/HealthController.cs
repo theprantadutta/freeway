@@ -25,8 +25,10 @@ public class HealthController : BaseApiController
                 "GET /health",
                 "GET /model/free",
                 "GET /model/paid",
+                "GET /model/image",
                 "GET /models/free",
                 "GET /models/paid",
+                "GET /models/image",
                 "POST /chat/completions",
                 "GET /admin/projects",
                 "GET /admin/analytics/summary"

@@ -12,6 +12,7 @@ export const modelsApi = {
   // Get selected models
   getSelectedFreeModel: () => api.get<SelectedModel>("/model/free"),
   getSelectedPaidModel: () => api.get<SelectedModel>("/model/paid"),
+  getSelectedImageModel: () => api.get<SelectedModel>("/model/image"),
 
   // Get all models - extract models array from response
   getFreeModels: async () => {
@@ -22,10 +23,16 @@ export const modelsApi = {
     const response = await api.get<ModelsListResponse>("/models/paid");
     return response.models || [];
   },
+  getImageModels: async () => {
+    const response = await api.get<ModelsListResponse>("/models/image");
+    return response.models || [];
+  },
 
   // Set selected models
   setSelectedFreeModel: (modelId: string) =>
     api.put("/admin/model/free", { model_id: modelId }),
   setSelectedPaidModel: (modelId: string) =>
     api.put("/admin/model/paid", { model_id: modelId }),
+  setSelectedImageModel: (modelId: string) =>
+    api.put("/admin/model/image", { model_id: modelId }),
 };

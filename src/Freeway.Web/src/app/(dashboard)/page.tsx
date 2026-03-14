@@ -8,6 +8,7 @@ import {
   Zap,
   TrendingUp,
   Brain,
+  Image,
 } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,6 +33,11 @@ export default function DashboardPage() {
   const { data: paidModel, isLoading: paidModelLoading } = useQuery({
     queryKey: ["model", "paid"],
     queryFn: () => modelsApi.getSelectedPaidModel(),
+  });
+
+  const { data: imageModel, isLoading: imageModelLoading } = useQuery({
+    queryKey: ["model", "image"],
+    queryFn: () => modelsApi.getSelectedImageModel(),
   });
 
   return (
@@ -105,7 +111,7 @@ export default function DashboardPage() {
           <h2 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">
             Selected Models
           </h2>
-          <div className="grid md:grid-cols-2 gap-4">
+          <div className="grid md:grid-cols-3 gap-4">
             {/* Free Model */}
             {freeModelLoading ? (
               <SkeletonCard />
@@ -160,6 +166,37 @@ export default function DashboardPage() {
                       {paidModel?.context_length && (
                         <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                           {formatNumber(paidModel.context_length)} context
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Image Model */}
+            {imageModelLoading ? (
+              <SkeletonCard />
+            ) : (
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="flex items-start gap-4">
+                    <div className="p-3 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
+                      <Image className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-medium text-gray-900 dark:text-gray-100">
+                          Image Model
+                        </h3>
+                        <Badge variant="warning">Active</Badge>
+                      </div>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate font-mono">
+                        {imageModel?.model_id || "Not configured"}
+                      </p>
+                      {imageModel?.context_length && (
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                          {formatNumber(imageModel.context_length)} context
                         </p>
                       )}
                     </div>
