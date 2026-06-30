@@ -309,6 +309,15 @@ model="paid" / "image" request (CreateChatCompletionCommandHandler):
   models fan out to backups.
 ```
 
+Every OpenRouter request also carries provider-routing preferences
+(`OpenRouterService.BuildProviderPreferences`): `sort` (default
+`throughput`), `allow_fallbacks` (default true) and an optional `ignore`
+blocklist. This makes OpenRouter pick the healthiest endpoint and route
+around a throttled provider to another one serving the *same* model,
+cutting 429s before the client-side model fallback chain is even needed.
+Configured via `OPENROUTER_PROVIDER_SORT`, `OPENROUTER_ALLOW_FALLBACKS`,
+`OPENROUTER_IGNORE_PROVIDERS`.
+
 ### 4. Supported Providers
 
 | Provider | Type | API Endpoint | Default Model |

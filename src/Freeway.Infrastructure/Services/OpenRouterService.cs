@@ -15,6 +15,9 @@ public class OpenRouterService : IOpenRouterService
     private readonly string _apiKey;
     private readonly int _requestTimeout;
     private readonly int _completionTimeout;
+    private readonly string _providerSort;
+    private readonly bool _allowFallbacks;
+    private readonly List<string> _ignoreProviders;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -29,6 +32,28 @@ public class OpenRouterService : IOpenRouterService
         _apiKey = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY") ?? "";
         _requestTimeout = int.TryParse(Environment.GetEnvironmentVariable("REQUEST_TIMEOUT_SECONDS"), out var rt) ? rt : 30;
         _completionTimeout = int.TryParse(Environment.GetEnvironmentVariable("COMPLETION_TIMEOUT_SECONDS"), out var ct) ? ct : 120;
+
+        // Provider routing: prefer the healthiest/fastest endpoint and let OpenRouter route
+        // around a throttled provider to another one serving the same model. Reduces 429s
+        // without changing model selection. Empty OPENROUTER_PROVIDER_SORT disables sorting.
+        _providerSort = Environment.GetEnvironmentVariable("OPENROUTER_PROVIDER_SORT") ?? "throughput";
+        _allowFallbacks = !bool.TryParse(Environment.GetEnvironmentVariable("OPENROUTER_ALLOW_FALLBACKS"), out var af) || af;
+        _ignoreProviders = (Environment.GetEnvironmentVariable("OPENROUTER_IGNORE_PROVIDERS") ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+    }
+
+    private OpenRouterProviderPreferences? BuildProviderPreferences()
+    {
+        var prefs = new OpenRouterProviderPreferences
+        {
+            Sort = string.IsNullOrWhiteSpace(_providerSort) ? null : _providerSort,
+            AllowFallbacks = _allowFallbacks,
+            Ignore = _ignoreProviders.Count > 0 ? _ignoreProviders : null
+        };
+
+        // Only attach if it actually carries routing intent.
+        return prefs.Sort == null && prefs.AllowFallbacks && prefs.Ignore == null ? null : prefs;
     }
 
     public async Task<List<OpenRouterModel>> GetModelsAsync(CancellationToken cancellationToken = default)
@@ -98,7 +123,8 @@ public class OpenRouterService : IOpenRouterService
                 FrequencyPenalty = options?.FrequencyPenalty,
                 PresencePenalty = options?.PresencePenalty,
                 Stop = options?.Stop,
-                Stream = options?.Stream ?? false
+                Stream = options?.Stream ?? false,
+                Provider = BuildProviderPreferences()
             };
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
@@ -204,6 +230,19 @@ public class OpenRouterService : IOpenRouterService
         public double? PresencePenalty { get; set; }
         public List<string>? Stop { get; set; }
         public bool Stream { get; set; }
+        public OpenRouterProviderPreferences? Provider { get; set; }
+    }
+
+    private class OpenRouterProviderPreferences
+    {
+        // "price" | "throughput" | "latency" - serialized as snake_case "sort"
+        public string? Sort { get; set; }
+
+        // Allow OpenRouter to route to other providers serving the same model on failure
+        public bool AllowFallbacks { get; set; } = true;
+
+        // Provider slugs to exclude (e.g. ["novita"])
+        public List<string>? Ignore { get; set; }
     }
 
     private class OpenRouterMessage

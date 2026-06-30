@@ -232,6 +232,9 @@ Environment variables (see `.env.example`):
 | `HUGGINGFACE_API_KEY` | No | HuggingFace API key (for fallback) |
 | `PAID_FALLBACK_COUNT` | No | Backup models to try after the primary for `paid`/`image` requests (default: 3) |
 | `MODEL_COOLDOWN_SECONDS` | No | How long a rate-limited (429) model is skipped before being retried (default: 60) |
+| `OPENROUTER_PROVIDER_SORT` | No | OpenRouter endpoint sort: `throughput`, `price`, or `latency` (default: `throughput`). Empty disables sorting |
+| `OPENROUTER_ALLOW_FALLBACKS` | No | Let OpenRouter route around a failed/throttled provider to another serving the same model (default: true) |
+| `OPENROUTER_IGNORE_PROVIDERS` | No | Comma-separated provider slugs to exclude, e.g. `novita,deepinfra` (default: none) |
 | `REQUEST_TIMEOUT_SECONDS` | No | Timeout for provider list/model fetches (default: 30) |
 | `COMPLETION_TIMEOUT_SECONDS` | No | Timeout for chat completion calls (default: 120) |
 | `DB_HOST` | No | Database host (default: localhost) |
