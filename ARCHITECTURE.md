@@ -286,6 +286,29 @@ model="free" request:
   └───────────────────────────────────────────────────────────┘
 ```
 
+```
+model="paid" / "image" request (CreateChatCompletionCommandHandler):
+
+  ┌───────────────────────────────────────────────────────────┐
+  │ BuildPaidCandidates(): ordered candidate list             │
+  │   = [selected model] + next PAID_FALLBACK_COUNT cheapest   │
+  │   (models on cooldown moved to the back as last resort)   │
+  │                                                           │
+  │ ExecuteWithModelFallbackAsync(): try each in order        │
+  │   Try #1: selected paid/image model                       │
+  │     └─► 429 → mark in ModelCooldownCache → try next       │
+  │     └─► other error → try next                            │
+  │   Try #2..N: next cheapest backup models                  │
+  │     └─► SUCCESS → return (usage logged vs the model used) │
+  │                                                           │
+  │ ALL CANDIDATES FAILED → 502 Bad Gateway                   │
+  └───────────────────────────────────────────────────────────┘
+
+  A specific model ID (e.g. "anthropic/claude-...") is a single
+  attempt with no substitution — only the "paid"/"image" virtual
+  models fan out to backups.
+```
+
 ### 4. Supported Providers
 
 | Provider | Type | API Endpoint | Default Model |

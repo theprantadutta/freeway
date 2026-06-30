@@ -78,6 +78,7 @@ public static class DependencyInjection
         services.AddSingleton<IProjectCacheService, ProjectCacheService>();
         services.AddSingleton<IProviderBenchmarkCache, ProviderBenchmarkCache>();
         services.AddSingleton<IProviderModelCache, ProviderModelCache>();
+        services.AddSingleton<IModelCooldownCache, ModelCooldownCache>();
 
         // Register orchestrator
         services.AddScoped<IProviderOrchestrator, ProviderOrchestrator>();

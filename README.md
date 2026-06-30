@@ -230,6 +230,10 @@ Environment variables (see `.env.example`):
 | `MISTRAL_API_KEY` | No | Mistral API key (for fallback) |
 | `COHERE_API_KEY` | No | Cohere API key (for fallback) |
 | `HUGGINGFACE_API_KEY` | No | HuggingFace API key (for fallback) |
+| `PAID_FALLBACK_COUNT` | No | Backup models to try after the primary for `paid`/`image` requests (default: 3) |
+| `MODEL_COOLDOWN_SECONDS` | No | How long a rate-limited (429) model is skipped before being retried (default: 60) |
+| `REQUEST_TIMEOUT_SECONDS` | No | Timeout for provider list/model fetches (default: 30) |
+| `COMPLETION_TIMEOUT_SECONDS` | No | Timeout for chat completion calls (default: 120) |
 | `DB_HOST` | No | Database host (default: localhost) |
 | `DB_PORT` | No | Database port (default: 5432) |
 | `DB_USER` | No | Database user (default: postgres) |
