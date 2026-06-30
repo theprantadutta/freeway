@@ -14,6 +14,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
     private readonly IProviderOrchestrator _providerOrchestrator;
     private readonly IModelCacheService _modelCacheService;
     private readonly IProviderModelCache _providerModelCache;
+    private readonly IModelCooldownCache _modelCooldownCache;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDateTimeService _dateTimeService;
     private readonly ILogger<CreateChatCompletionCommandHandler> _logger;
@@ -23,6 +24,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         IProviderOrchestrator providerOrchestrator,
         IModelCacheService modelCacheService,
         IProviderModelCache providerModelCache,
+        IModelCooldownCache modelCooldownCache,
         IServiceScopeFactory scopeFactory,
         IDateTimeService dateTimeService,
         ILogger<CreateChatCompletionCommandHandler> logger)
@@ -31,6 +33,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         _providerOrchestrator = providerOrchestrator;
         _modelCacheService = modelCacheService;
         _providerModelCache = providerModelCache;
+        _modelCooldownCache = modelCooldownCache;
         _scopeFactory = scopeFactory;
         _dateTimeService = dateTimeService;
         _logger = logger;
@@ -81,17 +84,20 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
                 return Result<ChatCompletionResponseDto>.Failure(resolved.error, 400);
             }
 
-            modelId = resolved.modelId!;
             modelType = resolved.modelType;
-            model = resolved.model;
 
-            if (modelId == null)
+            // Build an ordered candidate list. For the "paid"/"image" virtual models we
+            // include backup models (next cheapest) so one rate-limited/failing model does
+            // not fail the whole request. Specific model IDs keep single-attempt semantics.
+            var candidates = BuildPaidCandidates(request.Model, resolved);
+
+            if (candidates.Count == 0)
             {
                 return Result<ChatCompletionResponseDto>.ServiceUnavailable($"Model '{request.Model}' not available");
             }
 
-            // Call OpenRouter directly
-            result = await _openRouterService.CreateChatCompletionAsync(modelId, messages, options, cancellationToken);
+            // Try each candidate in order until one succeeds.
+            (result, modelId, model) = await ExecuteWithModelFallbackAsync(candidates, messages, options, cancellationToken);
         }
 
         // Log usage in background (fire-and-forget with its own scope)
@@ -125,6 +131,112 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
                 TotalTokens = result.Usage.TotalTokens
             }
         });
+    }
+
+    // Number of backup models to try after the primary for "paid"/"image" virtual models.
+    private static readonly int PaidFallbackCount =
+        int.TryParse(Environment.GetEnvironmentVariable("PAID_FALLBACK_COUNT"), out var n) && n >= 0 ? n : 3;
+
+    /// <summary>
+    /// Builds the ordered list of models to attempt. For the "paid" and "image" virtual
+    /// models the selected model is tried first, followed by the next cheapest models as
+    /// backups. Specific model IDs resolve to a single candidate (no silent substitution).
+    /// </summary>
+    private List<(string modelId, CachedModel? model)> BuildPaidCandidates(
+        string requestedModel,
+        (string? modelId, string modelType, CachedModel? model, string? error) resolved)
+    {
+        var candidates = new List<(string modelId, CachedModel? model)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(CachedModel? m)
+        {
+            if (m == null || string.IsNullOrEmpty(m.Id) || !seen.Add(m.Id))
+                return;
+            candidates.Add((m.Id, m));
+        }
+
+        if (requestedModel.Equals("paid", StringComparison.OrdinalIgnoreCase))
+        {
+            Add(resolved.model ?? _modelCacheService.GetSelectedPaidModel());
+            foreach (var m in _modelCacheService.GetPaidModels()) // ranked cheapest-first
+            {
+                if (candidates.Count > PaidFallbackCount) break;
+                Add(m);
+            }
+        }
+        else if (requestedModel.Equals("image", StringComparison.OrdinalIgnoreCase))
+        {
+            Add(resolved.model ?? _modelCacheService.GetSelectedImageModel());
+            foreach (var m in _modelCacheService.GetImageModels()) // ranked cheapest-first
+            {
+                if (candidates.Count > PaidFallbackCount) break;
+                Add(m);
+            }
+        }
+        else if (resolved.modelId != null)
+        {
+            // Specific model ID - single attempt, no substitution.
+            candidates.Add((resolved.modelId, resolved.model));
+            return candidates;
+        }
+
+        // Push models currently on cooldown (recently rate-limited) to the back so we prefer
+        // healthy models first, while still keeping them as a last resort if all else fails.
+        return candidates
+            .OrderBy(c => _modelCooldownCache.IsRateLimited(c.modelId) ? 1 : 0)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Calls OpenRouter for each candidate in order, returning the first success. On failure
+    /// it advances to the next candidate. Returns the last failure if all candidates fail.
+    /// </summary>
+    private async Task<(ChatCompletionResult result, string modelId, CachedModel? model)> ExecuteWithModelFallbackAsync(
+        List<(string modelId, CachedModel? model)> candidates,
+        List<ChatMessage> messages,
+        ChatCompletionOptions options,
+        CancellationToken cancellationToken)
+    {
+        ChatCompletionResult? lastResult = null;
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            var (candidateId, candidateModel) = candidates[i];
+            var result = await _openRouterService.CreateChatCompletionAsync(candidateId, messages, options, cancellationToken);
+
+            if (result.Success)
+            {
+                if (i > 0)
+                {
+                    _logger.LogInformation(
+                        "Request succeeded with backup model {Model} (attempt {Attempt}/{Total})",
+                        candidateId, i + 1, candidates.Count);
+                }
+                return (result, candidateId, candidateModel);
+            }
+
+            lastResult = result;
+
+            // Park rate-limited models so subsequent requests skip them during their cooldown.
+            if (result.HttpStatusCode == 429)
+            {
+                _modelCooldownCache.MarkRateLimited(candidateId);
+            }
+
+            _logger.LogWarning(
+                "Model {Model} failed ({StatusCode}): {Error}. {Remaining} backup model(s) remaining",
+                candidateId, result.HttpStatusCode, result.ErrorMessage, candidates.Count - i - 1);
+        }
+
+        if (candidates.Count > 1)
+        {
+            _logger.LogError("All {Count} candidate models failed for the request", candidates.Count);
+        }
+
+        var (lastId, lastModel) = candidates[^1];
+        return (lastResult ?? new ChatCompletionResult { Success = false, ErrorMessage = "No models available" },
+                lastId, lastModel);
     }
 
     private (string? modelId, string modelType, CachedModel? model, string? error) ResolveModel(string requestedModel)

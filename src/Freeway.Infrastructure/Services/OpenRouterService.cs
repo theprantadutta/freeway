@@ -119,6 +119,8 @@ public class OpenRouterService : IOpenRouterService
                 {
                     Success = false,
                     ErrorMessage = $"OpenRouter API error: {response.StatusCode}",
+                    HttpStatusCode = (int)response.StatusCode,
+                    ProviderName = "openrouter",
                     ResponseTimeMs = (int)stopwatch.ElapsedMilliseconds
                 };
             }
@@ -168,6 +170,7 @@ public class OpenRouterService : IOpenRouterService
             {
                 Success = false,
                 ErrorMessage = "Request timed out",
+                ProviderName = "openrouter",
                 ResponseTimeMs = (int)stopwatch.ElapsedMilliseconds
             };
         }
