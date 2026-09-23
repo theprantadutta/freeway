@@ -42,11 +42,24 @@ CLAUDE_UID=1000               # id -u
 CLAUDE_GID=1000               # id -g
 ```
 
-Check the uid actually owns them, or the container will not be able to refresh the
-token:
+**The uid must own those files.** This is the single most common way to get a bridge
+that starts cleanly and then fails every request: the container reads the credentials
+as `CLAUDE_UID`, and if that uid cannot read them, Claude Code dies locally before it
+ever calls the API.
 
 ```bash
-stat -c '%u %g' ~/.claude ~/.claude.json
+stat -c '%u %g' $CLAUDE_HOME/.claude $CLAUDE_HOME/.claude.json
+```
+
+If Claude Code was set up under `root`, that is `CLAUDE_HOME=/root` with
+`CLAUDE_UID=0` and `CLAUDE_GID=0` — `/root` is mode 700, so uid 1000 cannot even
+traverse into it.
+
+The bridge checks this at boot and says so plainly:
+
+```
+credentials: /home/claude/.claude/.credentials.json NOT readable by uid 1000
+  (owned by 0:0, mode 600). Set CLAUDE_UID/CLAUDE_GID to the owner of those files.
 ```
 
 Then:

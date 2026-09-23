@@ -77,6 +77,55 @@ function buildArgs(systemPrompt) {
   ];
 }
 
+/**
+ * Turns a failed invocation into one useful line.
+ *
+ * Claude Code prints a full result envelope even when it fails, so blindly slicing
+ * the first few hundred characters yields token counters and nothing about the
+ * cause. This digs out the fields that actually say what went wrong, and names the
+ * two failures that are almost always the real answer.
+ */
+function explain(code, stdout, stderr) {
+  const raw = `${stdout}
+${stderr}`;
+
+  if (/permission denied|EACCES/i.test(raw)) {
+    return (
+      `exit ${code}: cannot read the mounted credentials (permission denied). ` +
+      `The container runs as uid ${process.getuid?.() ?? "?"}; that uid must own ` +
+      `~/.claude and ~/.claude.json. Check CLAUDE_UID/CLAUDE_GID against ` +
+      `\`stat -c '%u %g' $CLAUDE_HOME/.claude\`.`
+    );
+  }
+
+  if (/not logged in|please run .?claude login|authentication_error|invalid api key|oauth/i.test(raw)) {
+    return `exit ${code}: Claude Code is not authenticated in the container. The mounted ~/.claude may be the wrong user's.`;
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    /* not JSON; fall through to the raw text */
+  }
+
+  if (parsed) {
+    const bits = [
+      parsed.subtype && parsed.subtype !== "success" ? parsed.subtype : null,
+      parsed.api_error_status ? `api ${parsed.api_error_status}` : null,
+      typeof parsed.result === "string" && parsed.result.trim() ? parsed.result.trim() : null,
+      parsed.error ? JSON.stringify(parsed.error) : null,
+      parsed.terminal_reason && parsed.terminal_reason !== "completed" ? parsed.terminal_reason : null,
+    ].filter(Boolean);
+
+    if (bits.length) return `exit ${code}: ${bits.join(" | ").slice(0, 300)}`;
+    return `exit ${code}: claude exited with a result envelope but no error detail (stop_reason ${parsed.stop_reason ?? "?"}, ${parsed.usage?.input_tokens ?? 0} input tokens)`;
+  }
+
+  const text = (stderr || stdout || "").trim().replace(/\s+/g, " ");
+  return `exit ${code}: ${text.slice(0, 300) || "no output"}`;
+}
+
 function runClaude(prompt, systemPrompt) {
   return new Promise((resolve) => {
     const started = Date.now();
@@ -115,8 +164,7 @@ function runClaude(prompt, systemPrompt) {
       const durationMs = Date.now() - started;
 
       if (code !== 0) {
-        const detail = (stderr || stdout || "").trim().slice(0, 400);
-        return done({ ok: false, reason: `exit ${code}: ${detail || "no output"}`, durationMs });
+        return done({ ok: false, reason: explain(code, stdout, stderr), durationMs });
       }
 
       let parsed;
@@ -300,6 +348,54 @@ const server = http.createServer(async (req, res) => {
   send(res, 404, { error: "not found" });
 });
 
+/**
+ * Says at boot whether the mounted credentials are actually readable by this
+ * process. Without it the first symptom is a failed probe several minutes later
+ * with an opaque exit code.
+ */
+function reportCredentials() {
+  const fs = require("node:fs");
+  const home = process.env.HOME || "/home/claude";
+  const uid = process.getuid?.() ?? "?";
+  const checks = [`${home}/.claude/.credentials.json`, `${home}/.claude.json`];
+
+  for (const path of checks) {
+    try {
+      fs.accessSync(path, fs.constants.R_OK);
+
+      // A directory passes a readability test. Docker silently creates one when the
+      // host path in a bind mount does not exist, which is a common way to end up
+      // with a "present" credentials file that Claude Code cannot use.
+      if (fs.statSync(path).isDirectory()) {
+        console.error(
+          `credentials: ${path} is a DIRECTORY, not a file. The host path it is ` +
+          `mounted from does not exist, so docker created an empty directory. ` +
+          `Check CLAUDE_HOME points at the home directory that actually holds these.`
+        );
+        continue;
+      }
+
+      console.log(`credentials: ${path} readable`);
+    } catch (err) {
+      const stat = (() => {
+        try {
+          const s = fs.statSync(path);
+          return s.isDirectory()
+            ? "it is a DIRECTORY — the host path probably does not exist, so docker created one"
+            : `owned by ${s.uid}:${s.gid}, mode ${(s.mode & 0o777).toString(8)}`;
+        } catch {
+          return "missing";
+        }
+      })();
+      console.error(
+        `credentials: ${path} NOT readable by uid ${uid} (${stat}). ` +
+        `Set CLAUDE_UID/CLAUDE_GID to the owner of those files.`
+      );
+    }
+  }
+}
+
 server.listen(PORT, HOST, () => {
-  console.log(`claude-bridge listening on ${HOST}:${PORT} (max ${MAX_CONCURRENT} concurrent)`);
+  console.log(`claude-bridge listening on ${HOST}:${PORT} (max ${MAX_CONCURRENT} concurrent, uid ${process.getuid?.() ?? "?"})`);
+  reportCredentials();
 });
