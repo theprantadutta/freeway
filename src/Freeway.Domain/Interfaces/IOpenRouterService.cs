@@ -6,6 +6,12 @@ public interface IOpenRouterService
 {
     Task<List<OpenRouterModel>> GetModelsAsync(CancellationToken cancellationToken = default);
     Task<List<OpenRouterModel>> GetImageModelsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Account credit and per-key limit. Null when the call fails, so a monitoring
+    /// job can tell "no data" apart from "no credit left".
+    /// </summary>
+    Task<OpenRouterCredit?> GetCreditsAsync(CancellationToken cancellationToken = default);
     Task<ChatCompletionResult> CreateChatCompletionAsync(
         string modelId,
         List<ChatMessage> messages,

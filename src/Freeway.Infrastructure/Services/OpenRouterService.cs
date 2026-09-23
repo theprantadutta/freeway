@@ -100,6 +100,66 @@ public class OpenRouterService : IOpenRouterService
         }
     }
 
+    public async Task<OpenRouterCredit?> GetCreditsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(_requestTimeout));
+
+            var credit = new OpenRouterCredit();
+
+            using (var request = new HttpRequestMessage(HttpMethod.Get, "https://openrouter.ai/api/v1/credits"))
+            {
+                request.Headers.Add("Authorization", $"Bearer {_apiKey}");
+                var response = await _httpClient.SendAsync(request, cts.Token);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("OpenRouter credits call failed: {StatusCode}", response.StatusCode);
+                    return null;
+                }
+
+                var body = await response.Content.ReadAsStringAsync(cts.Token);
+                var parsed = JsonSerializer.Deserialize<OpenRouterCreditsEnvelope>(body, JsonOptions);
+                if (parsed?.Data == null) return null;
+
+                credit.TotalCredits = parsed.Data.TotalCredits;
+                credit.TotalUsage = parsed.Data.TotalUsage;
+            }
+
+            // The per-key limit is a separate call and is optional: a key without a
+            // cap still reports account credit, so a failure here is not fatal.
+            try
+            {
+                using var keyRequest = new HttpRequestMessage(HttpMethod.Get, "https://openrouter.ai/api/v1/auth/key");
+                keyRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
+                var keyResponse = await _httpClient.SendAsync(keyRequest, cts.Token);
+                if (keyResponse.IsSuccessStatusCode)
+                {
+                    var keyBody = await keyResponse.Content.ReadAsStringAsync(cts.Token);
+                    var keyParsed = JsonSerializer.Deserialize<OpenRouterKeyEnvelope>(keyBody, JsonOptions);
+                    if (keyParsed?.Data != null)
+                    {
+                        credit.KeyLimit = keyParsed.Data.Limit;
+                        credit.KeyLimitRemaining = keyParsed.Data.LimitRemaining;
+                        credit.KeyExpiresAt = keyParsed.Data.ExpiresAt;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "OpenRouter key-limit call failed; reporting account credit only");
+            }
+
+            return credit;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch OpenRouter credits");
+            return null;
+        }
+    }
+
     public async Task<ChatCompletionResult> CreateChatCompletionAsync(
         string modelId,
         List<ChatMessage> messages,
@@ -272,5 +332,28 @@ public class OpenRouterService : IOpenRouterService
         public int PromptTokens { get; set; }
         public int CompletionTokens { get; set; }
         public int TotalTokens { get; set; }
+    }
+
+    private class OpenRouterCreditsEnvelope
+    {
+        public OpenRouterCreditsData? Data { get; set; }
+    }
+
+    private class OpenRouterCreditsData
+    {
+        public decimal TotalCredits { get; set; }
+        public decimal TotalUsage { get; set; }
+    }
+
+    private class OpenRouterKeyEnvelope
+    {
+        public OpenRouterKeyData? Data { get; set; }
+    }
+
+    private class OpenRouterKeyData
+    {
+        public decimal? Limit { get; set; }
+        public decimal? LimitRemaining { get; set; }
+        public DateTime? ExpiresAt { get; set; }
     }
 }

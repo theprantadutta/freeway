@@ -1,5 +1,6 @@
 using Freeway.Domain.Interfaces;
 using Freeway.Infrastructure.Jobs;
+using Freeway.Infrastructure.Notifications;
 using Freeway.Infrastructure.Persistence;
 using Freeway.Infrastructure.Providers;
 using Freeway.Infrastructure.Services;
@@ -87,6 +88,13 @@ public static class DependencyInjection
         services.AddScoped<IBackgroundJobService, BackgroundJobService>();
         services.AddScoped<IProviderBenchmarkJob, ProviderBenchmarkJob>();
         services.AddScoped<IModelValidationJob, ModelValidationJob>();
+
+        // Notifications
+        services.AddSingleton<IEmailSender, SmtpEmailSender>();
+        services.AddSingleton<IAlertCooldownCache, AlertCooldownCache>();
+        services.AddScoped<IUsageReportBuilder, UsageReportBuilder>();
+        services.AddScoped<IWeeklyUsageReportJob, WeeklyUsageReportJob>();
+        services.AddScoped<ISpendAlertJob, SpendAlertJob>();
 
         // Register auth service
         services.AddScoped<IAuthService, AuthService>();

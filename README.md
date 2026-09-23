@@ -23,6 +23,8 @@ Freeway is a full-featured AI Gateway built with .NET 10 that:
 - **Paid Tiers**: `paid:low`, `paid:moderate` and `paid:premium` route to curated models per cost/capability tier, each with its own fallback chain
 - **Image Generation**: Supports image generation models via `model: "image"` with auto-selection of cheapest option
 - **Daily Refresh**: Models updated via Hangfire background jobs
+- **Weekly Email Report**: Usage, cost and per-project breakdown emailed to the admin
+- **Spend Alerts**: Email when a project, model or the gateway overspends, or OpenRouter credit runs low
 - **PostgreSQL Storage**: Persistent storage for projects, users, and usage data
 - **Web Control Panel**: Next.js 15 dashboard with JWT authentication
 - **Docker Ready**: Includes Dockerfile and compose.yml with Traefik support
@@ -232,6 +234,15 @@ The model must belong to the tier being set; a mismatch returns `400`.
 }
 ```
 
+#### Notifications
+
+```bash
+GET  /admin/notifications/weekly-report/preview  # Build the report as JSON, send nothing
+POST /admin/notifications/weekly-report/send     # Send the weekly report now
+GET  /admin/notifications/alerts                 # Alerts currently firing, ignoring cooldown
+POST /admin/notifications/alerts/check           # Run the checks and email anything not in cooldown
+```
+
 #### Analytics
 
 ```bash
@@ -287,6 +298,26 @@ Environment variables (see `.env.example`):
 | `HANGFIRE_USERNAME` | No | Hangfire dashboard username |
 | `HANGFIRE_PASSWORD` | No | Hangfire dashboard password |
 | `ALLOWED_ORIGINS` | No | CORS origins (default: *) |
+| `SMTP_HOST` | No | SMTP server (default: `smtp.gmail.com`) |
+| `SMTP_PORT` | No | SMTP port; 587 uses STARTTLS, 465 implicit TLS (default: 587) |
+| `SMTP_USERNAME` | For email | SMTP user. For Gmail this is the full address |
+| `SMTP_PASSWORD` | For email | Gmail **App Password**, not the account password |
+| `SMTP_FROM` | No | From address (default: `SMTP_USERNAME`) |
+| `SMTP_FROM_NAME` | No | From display name (default: `Freeway`) |
+| `ADMIN_NOTIFICATION_EMAIL` | For email | Where reports and alerts are sent |
+| `WEEKLY_REPORT_ENABLED` | No | Turn the weekly report on/off (default: true) |
+| `WEEKLY_REPORT_CRON` | No | Cron in UTC (default: `0 3 * * 1`, Monday 03:00 UTC) |
+| `SPEND_ALERTS_ENABLED` | No | Turn alerts on/off (default: true) |
+| `SPEND_ALERT_CRON` | No | Cron in UTC (default: hourly) |
+| `ALERT_COOLDOWN_HOURS` | No | How long one alert stays quiet after firing (default: 12) |
+| `ALERT_GLOBAL_DAILY_USD` | No | Gateway-wide 24h spend threshold (default: 5) |
+| `ALERT_PROJECT_DAILY_USD` | No | Per-project 24h spend threshold (default: 2) |
+| `ALERT_PROJECT_DAILY_REQUESTS` | No | Per-project 24h request threshold (default: 5000) |
+| `ALERT_MODEL_DAILY_USD` | No | Single-model 24h spend threshold (default: 3) |
+| `ALERT_MONTHLY_USD` | No | Month-to-date budget (default: 25) |
+| `ALERT_OPENROUTER_CREDIT_USD` | No | Warn below this remaining credit (default: 2) |
+| `ALERT_OPENROUTER_KEY_REMAINING_USD` | No | Warn below this remaining key limit (default: 1) |
+| `ALERT_OPENROUTER_KEY_EXPIRY_DAYS` | No | Warn this many days before key expiry (default: 14) |
 
 ## Quick Start
 
@@ -495,6 +526,63 @@ curl "http://localhost:8080/admin/analytics/usage?project_id=YOUR_PROJECT_ID" \
   -H "X-Api-Key: your-admin-key"
 ```
 
+## Email Notifications
+
+Freeway emails the admin address in two situations.
+
+### Weekly usage report
+
+Sent Monday 03:00 UTC by default, covering the previous Monday-Sunday week:
+
+- Spend this week, last week and the change between them, month to date, and all time
+- Requests, success rate, tokens in and out, average response time
+- Per-project breakdown with requests, tokens and cost
+- Per-lane breakdown (free / low / moderate / premium / image)
+- Per-model breakdown with cost per request, so an expensive model is visible even
+  when its total is small
+- Most used model, the model that cost the most, the cheapest per request, and the
+  project that spent the most
+- Remaining OpenRouter credit, the key's own limit, and its expiry date
+
+A week with no traffic still sends a short email. Silence would otherwise be
+ambiguous: a quiet week and a broken job look identical from the inbox.
+
+### Spend and credit alerts
+
+Checked hourly. Each alert stays quiet for `ALERT_COOLDOWN_HOURS` after firing, so a
+runaway key produces one email rather than one per check.
+
+| Alert | Fires when |
+|-------|------------|
+| Gateway spend | 24h spend across all projects exceeds `ALERT_GLOBAL_DAILY_USD` |
+| Project spend | One project's 24h spend exceeds `ALERT_PROJECT_DAILY_USD` |
+| Project requests | One project's 24h request count exceeds `ALERT_PROJECT_DAILY_REQUESTS` |
+| Model spend | One model's 24h spend exceeds `ALERT_MODEL_DAILY_USD` |
+| Monthly budget | Month-to-date spend exceeds `ALERT_MONTHLY_USD` |
+| Credit low | OpenRouter remaining credit falls below `ALERT_OPENROUTER_CREDIT_USD` |
+| Key limit low | The key's remaining limit falls below `ALERT_OPENROUTER_KEY_REMAINING_USD` |
+| Key expiring | The key expires within `ALERT_OPENROUTER_KEY_EXPIRY_DAYS` days |
+
+The request-count alert exists because `rate_limit_per_minute` is stored but not
+enforced. A leaked project key is most visible as a spend or request-rate spike, and
+on free models the spend rules never fire, so the count rule is the one that catches it.
+
+Alert state is held in memory, matching the other caches in this project. A restart can
+repeat an alert once, which is the right way round: a duplicate warning is cheap, a
+missed one is not.
+
+### Gmail setup
+
+Gmail rejects account passwords over SMTP. Enable 2-Step Verification, create an
+**App Password** at <https://myaccount.google.com/apppasswords>, and use the 16
+characters as `SMTP_PASSWORD`. Port 587 uses STARTTLS; 465 uses implicit TLS.
+
+Verify the setup without waiting for Monday:
+
+```bash
+curl -X POST https://freeway.pranta.dev/admin/notifications/weekly-report/send   -H "X-Api-Key: your-admin-key"
+```
+
 ## Hangfire Dashboard
 
 Background job monitoring is available at `/hangfire` (requires basic auth with `HANGFIRE_USERNAME` and `HANGFIRE_PASSWORD`).
@@ -502,6 +590,8 @@ Background job monitoring is available at `/hangfire` (requires basic auth with 
 Recurring jobs:
 - **refresh-models**: Daily at midnight UTC - fetches models from all providers
 - **refresh-project-cache**: Daily at 1 AM UTC - reloads project cache from database
+- **weekly-usage-report**: Monday 03:00 UTC - emails the previous week's usage
+- **spend-alerts**: Hourly - checks spend thresholds and OpenRouter credit
 
 ## Deployment
 
