@@ -178,6 +178,45 @@ try
         job => job.ValidateModelsAsync(),
         Cron.Daily(2, 0)); // Daily at 2 AM UTC
 
+    // Weekly usage report. Covers the previous Monday-Sunday week.
+    var weeklyReportEnabled =
+        !bool.TryParse(Environment.GetEnvironmentVariable("WEEKLY_REPORT_ENABLED"), out var wre) || wre;
+    var weeklyReportCron = Environment.GetEnvironmentVariable("WEEKLY_REPORT_CRON") ?? "0 3 * * 1";
+
+    if (weeklyReportEnabled)
+    {
+        RecurringJob.AddOrUpdate<Freeway.Infrastructure.Notifications.IWeeklyUsageReportJob>(
+            "weekly-usage-report",
+            job => job.SendWeeklyReportAsync(),
+            weeklyReportCron);
+        Log.Information("Weekly usage report scheduled: {Cron}", weeklyReportCron);
+    }
+    else
+    {
+        RecurringJob.RemoveIfExists("weekly-usage-report");
+        Log.Information("Weekly usage report disabled");
+    }
+
+    // Spend and credit alerts. Hourly by default: frequent enough to catch a leaked
+    // key the same day, rare enough that the cooldown keeps the inbox quiet.
+    var spendAlertsEnabled =
+        !bool.TryParse(Environment.GetEnvironmentVariable("SPEND_ALERTS_ENABLED"), out var sae) || sae;
+    var spendAlertCron = Environment.GetEnvironmentVariable("SPEND_ALERT_CRON") ?? Cron.Hourly();
+
+    if (spendAlertsEnabled)
+    {
+        RecurringJob.AddOrUpdate<Freeway.Infrastructure.Notifications.ISpendAlertJob>(
+            "spend-alerts",
+            job => job.CheckAsync(),
+            spendAlertCron);
+        Log.Information("Spend alerts scheduled: {Cron}", spendAlertCron);
+    }
+    else
+    {
+        RecurringJob.RemoveIfExists("spend-alerts");
+        Log.Information("Spend alerts disabled");
+    }
+
     app.MapControllers();
 
     Log.Information("Freeway API started successfully");

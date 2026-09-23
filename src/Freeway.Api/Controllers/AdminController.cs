@@ -6,6 +6,7 @@ using Freeway.Domain.Common;
 using Freeway.Application.Features.Projects.Commands;
 using Freeway.Application.Features.Projects.Queries;
 using Freeway.Domain.Interfaces;
+using Freeway.Infrastructure.Notifications;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Freeway.Api.Controllers;
@@ -149,6 +150,62 @@ public class AdminController : BaseApiController
     {
         var result = await Mediator.Send(new GetUsageLogsQuery(projectId, limit, offset, startDate, endDate));
         return HandleResult(result);
+    }
+
+    #endregion
+
+    #region Notifications
+
+    /// <summary>
+    /// Sends the weekly usage report now, to the configured admin address.
+    /// Same content the scheduled job produces.
+    /// </summary>
+    [HttpPost("notifications/weekly-report/send")]
+    public async Task<ActionResult> SendWeeklyReport(
+        [FromServices] IWeeklyUsageReportJob job,
+        [FromServices] IEmailSender email)
+    {
+        if (!email.IsConfigured)
+        {
+            return BadRequest(new
+            {
+                detail = "SMTP is not configured. Set SMTP_USERNAME, SMTP_PASSWORD and ADMIN_NOTIFICATION_EMAIL."
+            });
+        }
+
+        await job.SendWeeklyReportAsync();
+        return Ok(new { sent = true, recipient = email.AdminEmail });
+    }
+
+    /// <summary>
+    /// Previews the weekly report as JSON without sending anything.
+    /// </summary>
+    [HttpGet("notifications/weekly-report/preview")]
+    public async Task<ActionResult> PreviewWeeklyReport([FromServices] IUsageReportBuilder builder)
+    {
+        var report = await builder.BuildWeeklyAsync();
+        return Ok(report);
+    }
+
+    /// <summary>
+    /// Runs the alert checks and returns everything currently firing, ignoring the
+    /// cooldown window. Nothing is emailed.
+    /// </summary>
+    [HttpGet("notifications/alerts")]
+    public async Task<ActionResult> GetActiveAlerts([FromServices] ISpendAlertJob job)
+    {
+        var alerts = await job.EvaluateAsync();
+        return Ok(new { count = alerts.Count, alerts });
+    }
+
+    /// <summary>
+    /// Runs the alert checks and emails anything not in cooldown.
+    /// </summary>
+    [HttpPost("notifications/alerts/check")]
+    public async Task<ActionResult> RunAlertCheck([FromServices] ISpendAlertJob job)
+    {
+        await job.CheckAsync();
+        return Ok(new { checked_at = DateTime.UtcNow });
     }
 
     #endregion
