@@ -15,7 +15,9 @@ public class OpenAiProvider : BaseAiProvider, IModelFetcher
 
     public override string Name => "openai";
     public override string DisplayName => "OpenAI";
-    public override bool IsFreeProvider => true;
+    // OpenAI bills per token. It must never sit in the free lane's rotation,
+    // or a "free" request quietly becomes a paid one.
+    public override bool IsFreeProvider => false;
     public override string DefaultModelId => "gpt-4o-mini";
     protected override string ApiKey => _apiKey;
 

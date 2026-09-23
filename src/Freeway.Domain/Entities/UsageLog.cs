@@ -27,6 +27,17 @@ public class UsageLog : BaseEntity
     public string? RequestId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string? Provider { get; set; }
+
+    /// <summary>
+    /// Provenance of <see cref="CostUsd"/>: "provider" (the upstream told us the
+    /// billed amount), "free_tier" (a provider's own free tier, genuinely zero),
+    /// "estimated" (tokens times a cached price) or "legacy" (written before cost
+    /// accounting was fixed, and under-reported). Null on rows predating this.
+    /// </summary>
+    public string? CostSource { get; set; }
+
+    /// <summary>The endpoint that actually served the request behind an aggregator.</summary>
+    public string? UpstreamProvider { get; set; }
     public List<ChatMessage>? RequestMessages { get; set; }
     public string? ResponseContent { get; set; }
     public string? FinishReason { get; set; }

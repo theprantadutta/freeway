@@ -184,7 +184,11 @@ public class OpenRouterService : IOpenRouterService
                 PresencePenalty = options?.PresencePenalty,
                 Stop = options?.Stop,
                 Stream = options?.Stream ?? false,
-                Provider = BuildProviderPreferences()
+                Provider = BuildProviderPreferences(),
+                // Makes the response carry usage.cost: the amount actually billed.
+                // Without this we can only multiply tokens by a cached headline
+                // price, which provider routing can make wrong.
+                Usage = new OpenRouterUsagePreference { Include = true }
             };
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
@@ -244,8 +248,12 @@ public class OpenRouterService : IOpenRouterService
                     CompletionTokens = completionResponse.Usage?.CompletionTokens ?? 0,
                     TotalTokens = completionResponse.Usage?.TotalTokens ?? 0
                 },
+                CostUsd = completionResponse.Usage?.Cost,
+                CostSource = completionResponse.Usage?.Cost is null ? null : "provider",
+                UpstreamProvider = completionResponse.Provider,
                 FinishReason = completionResponse.Choices?.FirstOrDefault()?.FinishReason,
                 Success = true,
+                ProviderName = "openrouter",
                 ResponseTimeMs = (int)stopwatch.ElapsedMilliseconds
             };
         }
@@ -291,6 +299,13 @@ public class OpenRouterService : IOpenRouterService
         public List<string>? Stop { get; set; }
         public bool Stream { get; set; }
         public OpenRouterProviderPreferences? Provider { get; set; }
+        public OpenRouterUsagePreference? Usage { get; set; }
+    }
+
+    private class OpenRouterUsagePreference
+    {
+        // Serialized as {"usage":{"include":true}} - opts the response into usage.cost.
+        public bool Include { get; set; }
     }
 
     private class OpenRouterProviderPreferences
@@ -318,6 +333,9 @@ public class OpenRouterService : IOpenRouterService
         public long Created { get; set; }
         public List<OpenRouterChoice>? Choices { get; set; }
         public OpenRouterUsage? Usage { get; set; }
+
+        /// <summary>The endpoint OpenRouter routed to, e.g. "DeepInfra".</summary>
+        public string? Provider { get; set; }
     }
 
     private class OpenRouterChoice
@@ -332,6 +350,13 @@ public class OpenRouterService : IOpenRouterService
         public int PromptTokens { get; set; }
         public int CompletionTokens { get; set; }
         public int TotalTokens { get; set; }
+
+        /// <summary>
+        /// Amount billed for this request, present only when the request opted in
+        /// via {"usage":{"include":true}}. Arrives in exponent form (2.45e-07), which
+        /// System.Text.Json reads into decimal.
+        /// </summary>
+        public decimal? Cost { get; set; }
     }
 
     private class OpenRouterCreditsEnvelope

@@ -104,6 +104,14 @@ public class WeeklyUsageReport
     public int TotalProjects { get; set; }
     public int ActiveProjects { get; set; }
 
+    /// <summary>Row counts by cost_source for the period, so the email can say how
+    /// much of the figure is a billed amount rather than an estimate.</summary>
+    public Dictionary<string, int> CostSources { get; set; } = new();
+
+    /// <summary>True when any row in the period has a cost that is not authoritative.</summary>
+    public bool HasUnreliableCost =>
+        CostSources.Any(kv => kv.Key is "legacy" or "unknown" or "estimated" or "backfilled");
+
     public OpenRouterCredit? Credit { get; set; }
 
     public bool HadTraffic => ThisWeek.Requests > 0;
