@@ -25,6 +25,7 @@ export default {
         panel: "rgb(var(--panel) / <alpha-value>)",
         raised: "rgb(var(--raised) / <alpha-value>)",
         sunken: "rgb(var(--sunken) / <alpha-value>)",
+        overlay: "rgb(var(--overlay) / <alpha-value>)",
         hair: "rgb(var(--hair) / <alpha-value>)",
         "hair-bright": "rgb(var(--hair-bright) / <alpha-value>)",
 
@@ -73,6 +74,11 @@ export default {
       },
       transitionTimingFunction: {
         out: "cubic-bezier(0.16, 1, 0.3, 1)",
+      },
+      boxShadow: {
+        // Theme-aware, because the light and dark themes separate an overlay from
+        // the page in different ways. See --overlay-shadow in globals.css.
+        overlay: "var(--overlay-shadow)",
       },
       keyframes: {
         lift: {

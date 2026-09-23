@@ -25,6 +25,12 @@
   --hair: 30 36 46;
   --hair-bright: 46 54 68;
 
+  /* Menus and popovers. A step above --raised on purpose: rows use --raised on
+     hover, and a menu the same colour as the row it opens over reads as a pane of
+     glass rather than a menu. The shadow does the rest of the work. */
+  --overlay: 30 37 48;
+  --overlay-shadow: 0 0 0 1px rgb(0 0 0 / 0.5), 0 10px 30px -6px rgb(0 0 0 / 0.7);
+
   --text: 233 238 245;
   --text-2: 150 160 176;
   --text-3: 99 109 125;
@@ -51,6 +57,11 @@
   --sunken: 244 245 248;
   --hair: 226 229 236;
   --hair-bright: 203 208 219;
+
+  /* Light has nowhere brighter to go -- panel and raised are both white -- so here
+     the shadow is what separates a menu from the page, not the fill. */
+  --overlay: 255 255 255;
+  --overlay-shadow: 0 0 0 1px rgb(15 20 30 / 0.08), 0 12px 28px -8px rgb(15 20 30 / 0.25);
 
   --text: 12 15 22;
   --text-2: 86 95 111;
