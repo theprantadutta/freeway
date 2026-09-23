@@ -51,6 +51,9 @@ public class CachedModel
     public string CompletionPrice { get; set; } = "0";
     public bool IsFree { get; set; }
     public bool IsImageModel { get; set; }
+
+    /// <summary>Price per generated image output, for image models.</summary>
+    public string? ImagePrice { get; set; }
     public int Rank { get; set; }
 
     /// <summary>Paid tier this model belongs to. Null for free and image models.</summary>
