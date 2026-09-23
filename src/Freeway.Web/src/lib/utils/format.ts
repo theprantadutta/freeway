@@ -1,31 +1,65 @@
-export function formatNumber(num: number | undefined | null): string {
-  if (num == null) return "0";
-  if (num >= 1_000_000) {
-    return `${(num / 1_000_000).toFixed(1)}M`;
-  }
-  if (num >= 1_000) {
-    return `${(num / 1_000).toFixed(1)}K`;
-  }
-  return num.toString();
+/** Compact magnitude for a figure that sits next to other figures. */
+export function compact(n: number | undefined | null): string {
+  if (n == null) return "0";
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (abs >= 10_000) return `${(n / 1_000).toFixed(0)}K`;
+  if (abs >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return Math.round(n).toLocaleString("en-US");
 }
 
-export function formatCurrency(amount: number | undefined | null, decimals = 4): string {
-  if (amount == null) return "$0.00";
-  return `$${amount.toFixed(decimals)}`;
+/** Exact count with separators, for a figure being read rather than compared. */
+export function count(n: number | undefined | null): string {
+  return (n ?? 0).toLocaleString("en-US");
 }
 
-export function formatDate(date: string | Date): string {
+/**
+ * Spend can span six orders of magnitude between lanes, so the precision follows the
+ * value: a real charge of a few millionths must not print as "$0.00".
+ */
+export function money(n: number | undefined | null): string {
+  if (n == null || n === 0) return "$0.00";
+  const abs = Math.abs(n);
+  if (abs < 0.000001) return "<$0.000001";
+  if (abs < 0.01) return `$${n.toFixed(6)}`;
+  if (abs < 1) return `$${n.toFixed(4)}`;
+  if (abs < 1000) return `$${n.toFixed(2)}`;
+  return `$${compact(n)}`;
+}
+
+/** Per-million-token price, the unit model catalogs quote. */
+export function perMillion(pricePerToken: string | number | undefined | null): string {
+  const v = typeof pricePerToken === "string" ? parseFloat(pricePerToken) : pricePerToken;
+  if (v == null || Number.isNaN(v)) return "—";
+  if (v === 0) return "free";
+  return money(v * 1_000_000);
+}
+
+export function pct(n: number | undefined | null, digits = 0): string {
+  if (n == null) return "0%";
+  return `${n.toFixed(digits)}%`;
+}
+
+export function ms(n: number | undefined | null): string {
+  if (n == null) return "—";
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}s`;
+  return `${Math.round(n)}ms`;
+}
+
+export function shortDate(date: string | Date): string {
   const d = typeof date === "string" ? new Date(date) : date;
-  return d.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export function formatDateTime(date: string | Date): string {
+export function fullDate(date: string | Date): string {
   const d = typeof date === "string" ? new Date(date) : date;
-  return d.toLocaleDateString("en-US", {
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+
+export function dateTime(date: string | Date): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  return d.toLocaleString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -34,53 +68,51 @@ export function formatDateTime(date: string | Date): string {
   });
 }
 
-export function formatRelativeTime(date: string | Date): string {
+export function ago(date: string | Date): string {
   const d = typeof date === "string" ? new Date(date) : date;
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffSeconds = Math.floor(diffMs / 1000);
-  const diffMinutes = Math.floor(diffSeconds / 60);
-  const diffHours = Math.floor(diffMinutes / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffSeconds < 60) return "just now";
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return formatDate(d);
+  const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return shortDate(d);
 }
 
-export function getModelShortName(modelId: string | undefined | null): string {
-  if (!modelId) return "Unknown";
-  const parts = modelId.split("/");
-  return parts.length > 1 ? parts[parts.length - 1] : modelId;
+/** Splits "vendor/model-name" so the vendor can be set back typographically. */
+export function splitModelId(modelId: string | undefined | null): {
+  vendor: string | null;
+  name: string;
+} {
+  if (!modelId) return { vendor: null, name: "unknown" };
+  const i = modelId.indexOf("/");
+  if (i === -1) return { vendor: null, name: modelId };
+  return { vendor: modelId.slice(0, i), name: modelId.slice(i + 1) };
 }
 
-/** ISO timestamp for midnight on the 1st of the current month, UTC. */
+export function modelShortName(modelId: string | undefined | null): string {
+  return splitModelId(modelId).name;
+}
+
+/** Change between two values as a signed percentage. Null when there is no baseline. */
+export function change(current: number, previous: number): number | null {
+  if (!previous) return null;
+  return ((current - previous) / previous) * 100;
+}
+
 export function startOfMonthIso(): string {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
 }
 
-/** ISO timestamp for N days ago, UTC. */
 export function daysAgoIso(days: number): string {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - days);
   return d.toISOString();
 }
 
-/** "September 2026" — used to label the current billing period. */
 export function currentMonthLabel(): string {
   return new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
-}
-
-/**
- * Money that can span six orders of magnitude between tiers. Keeps small
- * amounts legible without printing "$0.00" for a real charge.
- */
-export function formatSpend(amount: number | undefined | null): string {
-  if (amount == null || amount === 0) return "$0.00";
-  if (amount < 0.01) return `$${amount.toFixed(6)}`;
-  if (amount < 1) return `$${amount.toFixed(4)}`;
-  return `$${amount.toFixed(2)}`;
 }

@@ -62,12 +62,6 @@ export type PaidTier = "low" | "moderate" | "premium";
 
 export const PAID_TIERS: PaidTier[] = ["low", "moderate", "premium"];
 
-export const PAID_TIER_LABELS: Record<PaidTier, string> = {
-  low: "Low",
-  moderate: "Moderate",
-  premium: "Premium",
-};
-
 export interface ModelInfo {
   model_id: string;
   model_name: string;
@@ -162,4 +156,77 @@ export interface ProviderInfo {
   name: string;
   is_enabled: boolean;
   model_count?: number;
+}
+
+// Dashboard overview — one call, everything the console board needs.
+export interface UsagePoint {
+  date: string;
+  requests: number;
+  failures: number;
+  cost: number;
+  tokens: number;
+}
+
+export interface LaneUsage {
+  lane: string;
+  requests: number;
+  cost: number;
+  tokens: number;
+}
+
+export interface TopModel {
+  model_id: string;
+  model_type: string;
+  model_tier?: PaidTier | null;
+  requests: number;
+  cost: number;
+  tokens: number;
+}
+
+export interface TopProject {
+  project_id: string;
+  name: string;
+  requests: number;
+  cost: number;
+  is_active: boolean;
+}
+
+export interface RecentRequest {
+  id: string;
+  project_name: string;
+  model_id: string;
+  model_type: string;
+  model_tier?: PaidTier | null;
+  success: boolean;
+  response_time_ms: number;
+  cost_usd: number;
+  total_tokens: number;
+  created_at: string;
+}
+
+export interface OverviewTotals {
+  total_projects: number;
+  active_projects: number;
+  requests_today: number;
+  requests_this_month: number;
+  requests_all_time: number;
+  cost_today: number;
+  cost_this_month: number;
+  cost_all_time: number;
+  cost_previous_month: number;
+  requests_previous_month: number;
+  tokens_this_month: number;
+  failures_this_month: number;
+  success_rate_this_month: number;
+  avg_response_ms_this_month: number;
+}
+
+export interface Overview {
+  totals: OverviewTotals;
+  series: UsagePoint[];
+  lanes: LaneUsage[];
+  top_models: TopModel[];
+  top_projects: TopProject[];
+  recent: RecentRequest[];
+  days: number;
 }

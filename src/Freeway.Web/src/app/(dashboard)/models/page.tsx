@@ -1,367 +1,272 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Check, Star, SlidersHorizontal } from "lucide-react";
-import { Header } from "@/components/layout/header";
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Search, SlidersHorizontal, Star } from "lucide-react";
+import { PageHead } from "@/components/shell/page-head";
+import { Panel, PanelHead } from "@/components/ui/panel";
+import { Field } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SkeletonList } from "@/components/ui/skeleton";
-import { EmptyState, ErrorState } from "@/components/ui/empty-state";
+import { Tag } from "@/components/ui/tag";
+import { Segmented } from "@/components/ui/segmented";
+import { PulseRows } from "@/components/ui/pulse";
+import { Empty, Failed } from "@/components/ui/state";
 import { useToast } from "@/components/ui/toast";
 import { modelsApi } from "@/lib/api/models";
-import { formatNumber, formatCurrency } from "@/lib/utils/format";
+import { LANES, TIER_LANE, type LaneKey } from "@/lib/theme/lanes";
 import { cn } from "@/lib/utils/cn";
-import { ACCENTS, PAID_TIER_ACCENT, type AccentKey } from "@/lib/theme/accents";
+import { compact, perMillion, splitModelId } from "@/lib/utils/format";
 import { PAID_TIERS, type ModelInfo, type PaidTier } from "@/lib/types";
 
-type TabKey = "free" | "paid" | "image";
+type Tab = "free" | "paid" | "image";
 
 export default function ModelsPage() {
-  const queryClient = useQueryClient();
+  const qc = useQueryClient();
   const { toast } = useToast();
+
+  const [tab, setTab] = useState<Tab>("free");
+  const [tier, setTier] = useState<PaidTier>("low");
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<TabKey>("free");
-  const [paidTier, setPaidTier] = useState<PaidTier>("low");
 
-  // The accent in play follows the tab, and for paid it follows the tier.
-  const accentKey: AccentKey =
-    activeTab === "paid" ? PAID_TIER_ACCENT[paidTier] : activeTab;
-  const accent = ACCENTS[accentKey];
+  const laneKey: LaneKey = tab === "paid" ? TIER_LANE[tier] : tab;
+  const lane = LANES[laneKey];
 
-  const freeQuery = useQuery({
-    queryKey: ["models", "free"],
-    queryFn: () => modelsApi.getFreeModels(),
+  const free = useQuery({ queryKey: ["models", "free"], queryFn: () => modelsApi.getFreeModels() });
+  const paid = useQuery({
+    queryKey: ["models", "paid", tier],
+    queryFn: () => modelsApi.getPaidModelsForTier(tier),
   });
+  const image = useQuery({ queryKey: ["models", "image"], queryFn: () => modelsApi.getImageModels() });
 
-  const paidQuery = useQuery({
-    queryKey: ["models", "paid", paidTier],
-    queryFn: () => modelsApi.getPaidModelsForTier(paidTier),
+  const selFree = useQuery({ queryKey: ["model", "free"], queryFn: () => modelsApi.getSelectedFreeModel() });
+  const selPaid = useQuery({
+    queryKey: ["model", "paid", tier],
+    queryFn: () => modelsApi.getSelectedPaidModelForTier(tier),
   });
+  const selImage = useQuery({ queryKey: ["model", "image"], queryFn: () => modelsApi.getSelectedImageModel() });
 
-  const imageQuery = useQuery({
-    queryKey: ["models", "image"],
-    queryFn: () => modelsApi.getImageModels(),
-  });
-
-  const { data: selectedFree } = useQuery({
-    queryKey: ["model", "free"],
-    queryFn: () => modelsApi.getSelectedFreeModel(),
-  });
-
-  const { data: selectedPaid } = useQuery({
-    queryKey: ["model", "paid", paidTier],
-    queryFn: () => modelsApi.getSelectedPaidModelForTier(paidTier),
-  });
-
-  const { data: selectedImage } = useQuery({
-    queryKey: ["model", "image"],
-    queryFn: () => modelsApi.getSelectedImageModel(),
-  });
-
-  const setFreeMutation = useMutation({
-    mutationFn: (modelId: string) => modelsApi.setSelectedFreeModel(modelId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["model", "free"] });
-      toast("Free model selected", "success");
-    },
-    onError: () => toast("Could not select that free model", "error"),
-  });
-
-  const setPaidMutation = useMutation({
+  const pick = useMutation({
     mutationFn: (modelId: string) =>
-      modelsApi.setSelectedPaidModelForTier(paidTier, modelId),
+      tab === "free"
+        ? modelsApi.setSelectedFreeModel(modelId)
+        : tab === "paid"
+          ? modelsApi.setSelectedPaidModelForTier(tier, modelId)
+          : modelsApi.setSelectedImageModel(modelId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["model", "paid"] });
-      toast(`${ACCENTS[PAID_TIER_ACCENT[paidTier]].label} model selected`, "success");
+      qc.invalidateQueries({ queryKey: ["model"] });
+      qc.invalidateQueries({ queryKey: ["overview"] });
+      toast(`${lane.label} lane now routes to your pick`, "success");
     },
-    onError: () =>
-      toast(
-        `Could not select that ${ACCENTS[PAID_TIER_ACCENT[paidTier]].label.toLowerCase()} model`,
-        "error"
-      ),
+    onError: () => toast(`Could not change the ${lane.label.toLowerCase()} lane`, "error"),
   });
 
-  const setImageMutation = useMutation({
-    mutationFn: (modelId: string) => modelsApi.setSelectedImageModel(modelId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["model", "image"] });
-      toast("Image model selected", "success");
-    },
-    onError: () => toast("Could not select that image model", "error"),
-  });
-
-  const activeQuery =
-    activeTab === "free" ? freeQuery : activeTab === "paid" ? paidQuery : imageQuery;
+  const active = tab === "free" ? free : tab === "paid" ? paid : image;
+  const selectedId =
+    tab === "free"
+      ? selFree.data?.model_id
+      : tab === "paid"
+        ? selPaid.data?.model_id
+        : selImage.data?.model_id;
 
   const models = useMemo(() => {
-    const list = activeQuery.data ?? [];
+    const list = active.data ?? [];
     if (!search) return list;
     const q = search.toLowerCase();
     return list.filter(
-      (m) =>
-        m.model_id.toLowerCase().includes(q) ||
-        m.model_name.toLowerCase().includes(q)
+      (m) => m.model_id.toLowerCase().includes(q) || m.model_name.toLowerCase().includes(q)
     );
-  }, [activeQuery.data, search]);
-
-  const selectedModelId =
-    activeTab === "free"
-      ? selectedFree?.model_id
-      : activeTab === "paid"
-        ? selectedPaid?.model_id
-        : selectedImage?.model_id;
-
-  const isMutating =
-    activeTab === "free"
-      ? setFreeMutation.isPending
-      : activeTab === "paid"
-        ? setPaidMutation.isPending
-        : setImageMutation.isPending;
-
-  const handleSelectModel = (modelId: string) => {
-    if (activeTab === "free") setFreeMutation.mutate(modelId);
-    else if (activeTab === "paid") setPaidMutation.mutate(modelId);
-    else setImageMutation.mutate(modelId);
-  };
-
-  const totalCount = activeQuery.data?.length ?? 0;
+  }, [active.data, search]);
 
   return (
-    <div className="flex h-full flex-col">
-      <Header
-        title="Models"
-        subtitle="Choose what each lane routes to"
+    <div className="space-y-6">
+      <PageHead
+        title="Routing"
+        lede="Each lane points at one model. Requests name the lane, not the model, so this is where routing actually changes."
         actions={
-          <Tabs
-            defaultValue="free"
-            value={activeTab}
-            onChange={(v) => setActiveTab(v as TabKey)}
-          >
-            <TabsList>
-              <TabsTrigger value="free" accent={ACCENTS.free.scope}>
-                Free
-              </TabsTrigger>
-              <TabsTrigger value="paid" accent={accent.scope}>
-                Paid
-              </TabsTrigger>
-              <TabsTrigger value="image" accent={ACCENTS.image.scope}>
-                Image
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <Segmented
+            label="Model kind"
+            value={tab}
+            onChange={setTab}
+            segments={[
+              { value: "free", label: "Free", scope: LANES.free.scope },
+              { value: "paid", label: "Paid", scope: lane.scope },
+              { value: "image", label: "Image", scope: LANES.image.scope },
+            ]}
+          />
         }
       />
 
-      <div className="flex-1 space-y-4 p-4 md:p-6">
-        {activeTab === "paid" && (
-          <div className="flex flex-col gap-3 rounded-panel border border-line bg-panel p-3 sm:flex-row sm:items-center sm:gap-4">
-            <div
-              role="tablist"
-              aria-label="Paid tier"
-              className="flex items-center gap-0.5 rounded-control bg-inset p-0.5"
-            >
-              {PAID_TIERS.map((tier) => {
-                const tierAccent = ACCENTS[PAID_TIER_ACCENT[tier]];
-                const isActive = paidTier === tier;
-                return (
-                  <button
-                    key={tier}
-                    role="tab"
-                    aria-selected={isActive}
-                    onClick={() => setPaidTier(tier)}
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-[0.3125rem] px-3 py-1.5 text-sm font-medium",
-                      "transition-[background-color,color] duration-150 ease-swift",
-                      isActive
-                        ? cn(tierAccent.scope, "bg-panel accent-text shadow-pop")
-                        : "text-muted hover:text-ink"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        tierAccent.scope,
-                        "h-1.5 w-1.5 rounded-full accent-bg"
-                      )}
-                      aria-hidden
-                    />
-                    {tierAccent.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className={cn(accent.scope, "flex-1 text-xs leading-relaxed text-muted")}>
-              {accent.hint} Request it with{" "}
-              <code className="rounded bg-inset px-1 py-0.5 font-mono text-ink">
-                {accent.model}
-              </code>
-            </p>
-          </div>
+      {/* The lane currently being edited, stated plainly with the value a caller sends. */}
+      <div className={cn(lane.scope, "flex flex-wrap items-center gap-x-5 gap-y-3 rounded-panel border lane-edge lane-soft px-4 py-3")}>
+        <span className="flex items-center gap-2">
+          <lane.icon className="h-4 w-4 lane-fg" aria-hidden />
+          <span className="text-sm font-semibold text-text">{lane.label} lane</span>
+        </span>
+        <code className="rounded bg-base/40 px-2 py-1 font-mono text-xs lane-fg">
+          {'"model": "'}
+          {lane.model}
+          {'"'}
+        </code>
+        <p className="min-w-0 flex-1 text-xs text-text-2">{lane.blurb}</p>
+
+        {tab === "paid" && (
+          <Segmented
+            label="Paid tier"
+            value={tier}
+            onChange={setTier}
+            segments={PAID_TIERS.map((t) => ({
+              value: t,
+              label: LANES[TIER_LANE[t]].label,
+              scope: LANES[TIER_LANE[t]].scope,
+            }))}
+          />
         )}
+      </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <Input
-            placeholder="Search by name or ID"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            leading={<Search className="h-4 w-4" />}
-            className="sm:max-w-sm"
-            aria-label="Search models"
-          />
-          <p className="text-sm text-subtle">
-            {search
-              ? `${models.length} of ${totalCount} models`
-              : `${totalCount} models`}
-            {activeTab === "paid" && " in this tier, in fallback order"}
-          </p>
-        </div>
+      <Panel>
+        <PanelHead
+          title={`${compact(active.data?.length ?? 0)} models`}
+          meta={
+            tab === "paid"
+              ? "In fallback order: curated first, then cheapest in the band"
+              : tab === "free"
+                ? "Ranked by context length"
+                : "Ranked by what they cost to generate"
+          }
+          action={
+            <Field
+              placeholder="Filter"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              lead={<Search className="h-3.5 w-3.5" />}
+              aria-label="Filter models"
+              className="h-8 w-44 sm:w-60"
+            />
+          }
+        />
 
-        {activeQuery.isLoading ? (
-          <SkeletonList count={5} />
-        ) : activeQuery.isError ? (
-          <ErrorState
-            title="Could not load models"
-            description="The gateway did not return its model catalog. It refreshes daily, so a restart may be needed."
-            onRetry={() => activeQuery.refetch()}
-          />
+        {active.isLoading ? (
+          <PulseRows rows={8} />
+        ) : active.isError ? (
+          <div className="p-4">
+            <Failed
+              title="Could not load models"
+              body="The catalog refreshes daily. If this persists the gateway may not have reached its providers."
+              onRetry={() => active.refetch()}
+            />
+          </div>
         ) : models.length === 0 ? (
-          <EmptyState
-            className={accent.scope}
+          <Empty
+            className={lane.scope}
             icon={search ? Search : SlidersHorizontal}
-            title={search ? "No models match that" : "No models in this lane"}
-            description={
+            title={search ? "Nothing matches that" : "No models in this lane"}
+            body={
               search
-                ? "Try part of the provider or model name, like 'gemini' or 'mini'."
-                : "The gateway has not cached any models here yet. Check back after the next refresh."
+                ? "Try part of a vendor or model name, like 'gemini' or 'mini'."
+                : "The gateway has not cached anything here yet. Check back after the next refresh."
             }
             action={
               search ? (
-                <Button variant="outline" size="sm" onClick={() => setSearch("")}>
-                  Clear search
-                </Button>
+                <Button onClick={() => setSearch("")}>Clear filter</Button>
               ) : undefined
             }
           />
         ) : (
-          <div className="grid gap-2.5">
-            {models.map((model) => (
-              <ModelRow
-                key={model.model_id}
-                model={model}
-                accentScope={accent.scope}
-                isSelected={model.model_id === selectedModelId}
-                onSelect={() => handleSelectModel(model.model_id)}
-                isBusy={isMutating}
-              />
-            ))}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[46rem]">
+              <thead>
+                <tr className="border-b border-hair text-left">
+                  <th className="px-4 py-2 text-2xs font-medium uppercase text-text-3">Model</th>
+                  <th className="px-3 py-2 text-right text-2xs font-medium uppercase text-text-3">Context</th>
+                  <th className="px-3 py-2 text-right text-2xs font-medium uppercase text-text-3">In /M</th>
+                  <th className="px-3 py-2 text-right text-2xs font-medium uppercase text-text-3">Out /M</th>
+                  <th className="w-28 px-4 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-hair">
+                {models.map((m) => (
+                  <ModelRow
+                    key={m.model_id}
+                    model={m}
+                    laneScope={lane.scope}
+                    selected={m.model_id === selectedId}
+                    busy={pick.isPending}
+                    onPick={() => pick.mutate(m.model_id)}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
-      </div>
+      </Panel>
     </div>
   );
 }
 
 function ModelRow({
   model,
-  accentScope,
-  isSelected,
-  onSelect,
-  isBusy,
+  laneScope,
+  selected,
+  busy,
+  onPick,
 }: {
   model: ModelInfo;
-  accentScope: string;
-  isSelected: boolean;
-  onSelect: () => void;
-  isBusy: boolean;
+  laneScope: string;
+  selected: boolean;
+  busy: boolean;
+  onPick: () => void;
 }) {
-  const shortName = model.model_id.split("/").pop() || model.model_id;
-  const vendor = model.model_id.includes("/") ? model.model_id.split("/")[0] : null;
-  const prompt = model.pricing ? parseFloat(model.pricing.prompt) * 1_000_000 : null;
-  const completion = model.pricing
-    ? parseFloat(model.pricing.completion) * 1_000_000
-    : null;
+  const { vendor, name } = splitModelId(model.model_id);
 
   return (
-    <Card
-      rail={isSelected}
-      className={cn(
-        accentScope,
-        "px-4 py-3.5 transition-colors duration-200 ease-swift",
-        isSelected ? "accent-border accent-tint" : "hover:border-line-strong"
-      )}
-    >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="truncate text-base font-semibold text-ink">
-              {model.model_name || shortName}
-            </h3>
-            {model.rank != null && model.rank <= 3 && (
-              <Badge variant="outline">#{model.rank}</Badge>
-            )}
-            {model.is_curated && (
-              <Badge variant="accent" dot>
-                <Star className="h-3 w-3" aria-hidden />
-                Curated
-              </Badge>
-            )}
-            {isSelected && (
-              <Badge variant="accent" dot>
-                In use
-              </Badge>
-            )}
-          </div>
-          <p className="mt-0.5 truncate font-mono text-xs text-subtle">
-            {vendor && <span className="text-muted">{vendor}/</span>}
-            {shortName}
-          </p>
+    <tr className={cn(laneScope, "group transition-colors", selected ? "lane-soft" : "hover:bg-raised")}>
+      <td className="px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          {selected && <span className="h-1.5 w-1.5 shrink-0 rounded-full lane-bg" aria-hidden />}
+          <span className="truncate font-mono text-xs text-text">
+            {vendor && <span className="text-text-3">{vendor}/</span>}
+            {name}
+          </span>
+          {model.is_curated && (
+            <Tag tone="lane" className="shrink-0">
+              <Star className="h-2.5 w-2.5" aria-hidden />
+              curated
+            </Tag>
+          )}
+          {model.rank != null && model.rank <= 3 && !model.is_curated && (
+            <Tag className="shrink-0">#{model.rank}</Tag>
+          )}
         </div>
-
-        <dl className="metric flex items-center gap-5 text-xs">
-          <div>
-            <dt className="text-subtle">Context</dt>
-            <dd className="mt-0.5 font-medium text-ink">
-              {formatNumber(model.context_length)}
-            </dd>
-          </div>
-          {prompt != null && completion != null && (
-            <>
-              <div>
-                <dt className="text-subtle">In / M</dt>
-                <dd className="mt-0.5 font-medium text-ink">
-                  {formatCurrency(prompt, 2)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-subtle">Out / M</dt>
-                <dd className="mt-0.5 font-medium text-ink">
-                  {formatCurrency(completion, 2)}
-                </dd>
-              </div>
-            </>
-          )}
-        </dl>
-
-        <Button
-          variant={isSelected ? "secondary" : "outline"}
-          size="sm"
-          onClick={onSelect}
-          disabled={isSelected || isBusy}
-          isLoading={isBusy && !isSelected}
-        >
-          {isSelected ? (
-            <>
-              <Check className="h-3.5 w-3.5" aria-hidden />
-              Selected
-            </>
-          ) : (
-            "Use this"
-          )}
-        </Button>
-      </div>
-    </Card>
+        {model.model_name && model.model_name !== name && (
+          <p className="mt-0.5 truncate text-xs text-text-3">{model.model_name}</p>
+        )}
+      </td>
+      <td className="fig px-3 py-2.5 text-right text-xs text-text-2">
+        {compact(model.context_length)}
+      </td>
+      <td className="fig px-3 py-2.5 text-right text-xs text-text-2">
+        {perMillion(model.pricing?.prompt)}
+      </td>
+      <td className="fig px-3 py-2.5 text-right text-xs text-text-2">
+        {perMillion(model.pricing?.completion)}
+      </td>
+      <td className="px-4 py-2.5 text-right">
+        {selected ? (
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium lane-fg">
+            <Check className="h-3.5 w-3.5" aria-hidden />
+            Routing
+          </span>
+        ) : (
+          <Button
+            size="sm"
+            busy={busy}
+            onClick={onPick}
+            className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            Route here
+          </Button>
+        )}
+      </td>
+    </tr>
   );
 }
