@@ -15,10 +15,24 @@ public class UsageSummaryDto
     public int TotalRequests { get; set; }
     public int SuccessfulRequests { get; set; }
     public int FailedRequests { get; set; }
-    public int TotalInputTokens { get; set; }
-    public int TotalOutputTokens { get; set; }
+
+    // long, not int: these are lifetime sums for a project, and a busy one passes
+    // int.MaxValue eventually. LINQ's Sum throws on overflow rather than wrapping,
+    // so the endpoint would start returning 500s instead of a wrong number.
+    public long TotalInputTokens { get; set; }
+    public long TotalOutputTokens { get; set; }
+
     public decimal TotalCostUsd { get; set; }
     public double AvgResponseTimeMs { get; set; }
+
+    /// <summary>
+    /// Percentage, 0-100. Computed here because every caller wants it and none of
+    /// them should be dividing counts themselves.
+    /// </summary>
+    public double SuccessRate =>
+        TotalRequests == 0 ? 100 : (double)SuccessfulRequests / TotalRequests * 100;
+
+    public long TotalTokens => TotalInputTokens + TotalOutputTokens;
 }
 
 public class ModelUsageStatsDto
@@ -29,7 +43,7 @@ public class ModelUsageStatsDto
     /// <summary>Paid tier slug, or null for free/image traffic and for pre-tier rows.</summary>
     public string? ModelTier { get; set; }
     public int Requests { get; set; }
-    public int Tokens { get; set; }
+    public long Tokens { get; set; }
     public decimal CostUsd { get; set; }
 }
 

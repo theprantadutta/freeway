@@ -40,8 +40,8 @@ public class GetProjectUsageQueryHandler : IRequestHandler<GetProjectUsageQuery,
             TotalRequests = logs.Count,
             SuccessfulRequests = logs.Count(l => l.Success),
             FailedRequests = logs.Count(l => !l.Success),
-            TotalInputTokens = logs.Sum(l => l.InputTokens),
-            TotalOutputTokens = logs.Sum(l => l.OutputTokens),
+            TotalInputTokens = logs.Sum(l => (long)l.InputTokens),
+            TotalOutputTokens = logs.Sum(l => (long)l.OutputTokens),
             TotalCostUsd = logs.Sum(l => l.CostUsd),
             AvgResponseTimeMs = logs.Count > 0 ? logs.Average(l => l.ResponseTimeMs) : 0
         };
@@ -54,7 +54,7 @@ public class GetProjectUsageQueryHandler : IRequestHandler<GetProjectUsageQuery,
                 ModelType = g.Key.ModelType,
                 ModelTier = g.Key.ModelTier,
                 Requests = g.Count(),
-                Tokens = g.Sum(l => l.InputTokens + l.OutputTokens),
+                Tokens = g.Sum(l => (long)l.InputTokens + l.OutputTokens),
                 CostUsd = g.Sum(l => l.CostUsd)
             })
             .OrderByDescending(m => m.Requests)
