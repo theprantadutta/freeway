@@ -59,6 +59,7 @@ public class UsageReportBuilder : IUsageReportBuilder
                 ModelId = u.ModelId,
                 ModelType = u.ModelType,
                 ModelTier = u.ModelTier,
+                CostSource = u.CostSource,
                 InputTokens = u.InputTokens,
                 OutputTokens = u.OutputTokens,
                 CostUsd = u.CostUsd,
@@ -110,6 +111,10 @@ public class UsageReportBuilder : IUsageReportBuilder
             })
             .OrderByDescending(m => m.Requests)
             .ToList();
+
+        report.CostSources = weekLogs
+            .GroupBy(l => l.CostSource ?? "legacy")
+            .ToDictionary(g => g.Key, g => g.Count());
 
         report.Tiers = weekLogs
             .GroupBy(l => TierLabel(l.ModelType, l.ModelTier))
@@ -198,6 +203,7 @@ public class UsageReportBuilder : IUsageReportBuilder
         public string ModelId { get; set; } = string.Empty;
         public string ModelType { get; set; } = string.Empty;
         public string? ModelTier { get; set; }
+        public string? CostSource { get; set; }
         public int InputTokens { get; set; }
         public int OutputTokens { get; set; }
         public decimal CostUsd { get; set; }

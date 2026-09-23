@@ -99,7 +99,8 @@ OpenAI-compatible chat completion endpoint.
 ```
 
 **Model options:**
-- `"free"` - Use best free model (auto-selected)
+- `"free"` - Route across free providers. **Never incurs a charge**: if every free
+  provider fails, the request returns `503` rather than falling back to a paid model
 - `"paid"` - Alias for `"paid:low"` (unchanged behaviour)
 - `"paid:low"` - Cheapest paid models
 - `"paid:moderate"` - Balanced cost/capability models
@@ -639,7 +640,43 @@ To customize domains, edit the Traefik labels in `compose.yml`.
    - Authentication validated (API key or JWT)
    - Model resolved (free/paid/image/specific)
    - Request proxied to appropriate provider
-   - Usage logged to database
+   - Usage logged to database, with the cost the provider actually billed
+
+## Cost accounting
+
+Every request records what it cost and **where that figure came from**, in
+`usage_logs.cost_source`:
+
+| `cost_source` | Meaning |
+|---------------|---------|
+| `provider` | The amount the upstream actually billed. Authoritative |
+| `free_tier` | Served by a provider's own free tier (Groq, Gemini, Mistral, Cohere, HuggingFace). Genuinely zero |
+| `estimated` | Tokens multiplied by a cached catalog price. Approximate |
+| `backfilled` | Re-costed after the fact at catalog prices. Approximate |
+| `legacy` | Written before cost accounting was fixed. Under-reported |
+| `unknown` | Neither a price nor a billed amount was available |
+
+OpenRouter requests carry `{"usage":{"include":true}}`, so the response returns
+`usage.cost` — the real charge — along with the endpoint that served it
+(recorded as `upstream_provider`).
+
+This matters because of provider routing: with `OPENROUTER_PROVIDER_SORT=throughput`,
+the endpoint serving a request may not charge the model's headline rate. A measured
+request billed `$0.00000036` where the cached-price estimate gave `$0.00000025` — a
+44% under-estimate on a single call.
+
+### Why `free` never falls back to paid
+
+The free lane used to fall through to a paid OpenRouter model when every free
+provider failed. The request succeeded, but it was logged as `free` with a cost of
+zero, so real spend became invisible. On one gateway this hid 181 requests and
+283,047 tokens on a paid model.
+
+A lane called `free` must never produce a bill. Callers that want a paid model on
+failure ask for one explicitly with `paid` or `paid:<tier>`.
+
+`OpenAiProvider` is likewise **not** treated as a free provider — OpenAI bills per
+token, so it must never sit in the free lane's rotation.
 
 ## Tech Stack
 

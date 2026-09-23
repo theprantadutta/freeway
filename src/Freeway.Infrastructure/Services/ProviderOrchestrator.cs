@@ -66,6 +66,12 @@ public class ProviderOrchestrator : IProviderOrchestrator
             {
                 _logger.LogInformation("Request succeeded with {Provider} using model {Model}", providerName, modelId);
                 _benchmarkCache.AddBenchmarkResult(providerName, result.ResponseTimeMs, true);
+
+                // These are the providers' own free tiers, billed in quota rather than
+                // money. Recording that explicitly keeps a real zero distinguishable
+                // from a cost we simply never worked out.
+                result.CostUsd = 0m;
+                result.CostSource = "free_tier";
                 return result;
             }
 
@@ -73,39 +79,25 @@ public class ProviderOrchestrator : IProviderOrchestrator
             _benchmarkCache.AddBenchmarkResult(providerName, result.ResponseTimeMs, false);
         }
 
-        // All free providers failed, try OpenRouter as paid fallback
-        if (providersDict.TryGetValue("openrouter", out var openRouterProvider) && openRouterProvider.IsEnabled)
-        {
-            var openRouterModelId = _providerModelCache.GetBestModelId("openrouter");
-            if (!string.IsNullOrEmpty(openRouterModelId))
-            {
-                _logger.LogWarning("All free providers failed, falling back to OpenRouter paid with model {Model}", openRouterModelId);
-
-                var result = await TryProviderWithRetryAsync(openRouterProvider, openRouterModelId, messages, options, cancellationToken);
-
-                if (result.Success)
-                {
-                    _logger.LogInformation("Request succeeded with OpenRouter (paid fallback) using model {Model}", openRouterModelId);
-                    return result;
-                }
-
-                errors.Add($"{openRouterProvider.DisplayName}: {result.ErrorMessage}");
-            }
-            else
-            {
-                _logger.LogWarning("OpenRouter has no cached models, cannot fallback");
-            }
-        }
-
-        // All providers failed
-        _logger.LogError("All providers failed. Errors: {Errors}", string.Join("; ", errors));
+        // Deliberately no paid fallback here.
+        //
+        // This used to fall through to a paid OpenRouter model when every free
+        // provider failed. The request succeeded, but it was still logged as "free"
+        // with a cost of zero, so real spend became invisible. A lane called "free"
+        // must never produce a bill; callers that want a paid model ask for one with
+        // "paid" or "paid:<tier>".
+        _logger.LogError("All free providers failed. Errors: {Errors}", string.Join("; ", errors));
 
         return new ChatCompletionResult
         {
             Success = false,
-            ErrorMessage = $"All providers failed: {string.Join("; ", errors)}",
-            HttpStatusCode = 502,
-            ProviderName = "orchestrator"
+            ErrorMessage =
+                $"No free provider could serve this request: {string.Join("; ", errors)}. " +
+                "Retry shortly, or request \"paid:low\" to use a paid model.",
+            HttpStatusCode = 503,
+            ProviderName = "orchestrator",
+            CostUsd = 0m,
+            CostSource = "free_tier"
         };
     }
 

@@ -60,6 +60,22 @@ public class ChatCompletionResult
 {
     public string Id { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What the upstream actually charged, when it tells us. Preferred over any
+    /// price-times-tokens estimate: with provider routing the endpoint that served
+    /// a request may not charge the model's headline rate.
+    /// </summary>
+    public decimal? CostUsd { get; set; }
+
+    /// <summary>Who really served it, e.g. "DeepInfra" behind OpenRouter.</summary>
+    public string? UpstreamProvider { get; set; }
+
+    /// <summary>
+    /// How CostUsd was arrived at: "provider" (billed amount), "free_tier"
+    /// (a provider's own free tier, genuinely zero), or "estimated".
+    /// </summary>
+    public string? CostSource { get; set; }
     public List<ChatCompletionChoice> Choices { get; set; } = new();
     public ChatCompletionUsage Usage { get; set; } = new();
     public long Created { get; set; }

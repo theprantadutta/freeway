@@ -1,3 +1,4 @@
+using System.Globalization;
 using Freeway.Application.Common;
 using Freeway.Application.DTOs;
 using Freeway.Domain.Common;
@@ -347,12 +348,39 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             decimal promptCost = 0;
             decimal completionCost = 0;
             decimal totalCost = 0;
+            string costSource;
 
             if (model != null)
             {
-                decimal.TryParse(model.PromptPrice, out promptCost);
-                decimal.TryParse(model.CompletionPrice, out completionCost);
+                // Kept for the per-token columns and as the fallback figure. Parsed with
+                // the invariant culture because these are API strings like "0.0000001",
+                // not values formatted for the host's locale.
+                decimal.TryParse(model.PromptPrice, NumberStyles.Float, CultureInfo.InvariantCulture, out promptCost);
+                decimal.TryParse(model.CompletionPrice, NumberStyles.Float, CultureInfo.InvariantCulture, out completionCost);
                 totalCost = (result.Usage.PromptTokens * promptCost) + (result.Usage.CompletionTokens * completionCost);
+            }
+
+            if (result.CostUsd.HasValue)
+            {
+                // The upstream told us what it actually charged. Always prefer that:
+                // provider routing means the endpoint that served the request may not
+                // charge the model's headline rate, so the estimate above can be wrong
+                // in either direction.
+                totalCost = result.CostUsd.Value;
+                costSource = result.CostSource ?? "provider";
+            }
+            else if (model != null)
+            {
+                costSource = "estimated";
+            }
+            else
+            {
+                // No price and no billed amount. Record the gap rather than writing a
+                // confident zero: that conflation is what hid real spend before.
+                costSource = "unknown";
+                _logger.LogWarning(
+                    "No cost information for {ModelId} via {Provider}; logging usage with cost unknown",
+                    modelId, result.ProviderName ?? "unknown");
             }
 
             var usageLog = new UsageLog
@@ -373,6 +401,8 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
                 RequestId = result.Id,
                 CreatedAt = dateTimeService.UtcNow,
                 Provider = result.ProviderName ?? "openrouter",
+                CostSource = costSource,
+                UpstreamProvider = result.UpstreamProvider,
                 RequestMessages = request.Messages.Select(m => new ChatMessage
                 {
                     Role = m.Role,

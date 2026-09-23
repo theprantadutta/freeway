@@ -156,7 +156,7 @@
 │  └─────────────────────────────────────────────────────────────────────┘  │
 │                                                                            │
 │  IF all free providers fail:                                               │
-│  └─► Fallback to OpenRouter (paid) as last resort                          │
+│  └─► NO paid fallback: returns 503 if every free provider fails                          │
 │  └─► If that fails: return 502 with all error messages                     │
 └───────────────────────────────────────────────────────────────────────────┘
                     │
@@ -284,7 +284,7 @@ model="free" request:
   │   └─► SUCCESS → Return result, update benchmark           │
   │                                                           │
   │ ALL FAILED:                                               │
-  │   └─► Fallback to OpenRouter (paid) as last resort        │
+  │   └─► NO paid fallback: returns 503 if every free provider fails        │
   └───────────────────────────────────────────────────────────┘
 ```
 

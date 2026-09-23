@@ -66,12 +66,12 @@ public static class EmailTemplates
         sb.Append($@"
 <table role='presentation' width='100%' cellpadding='0' cellspacing='0' style='margin:0 0 24px'>
   <tr>
-    {MetricCell("Spent this week", Money(r.ThisWeek.CostUsd), ChangeNote(r))}
-    {MetricCell("Requests", Num(r.ThisWeek.Requests), $"{r.ThisWeek.SuccessRate:0.0}% succeeded")}
+    {MetricCell("Spent this week", Money(r.ThisWeek.CostUsd), ChangeNote(r), true)}
+    {MetricCell("Requests", Num(r.ThisWeek.Requests), $"{r.ThisWeek.SuccessRate:0.0}% succeeded", false)}
   </tr>
   <tr>
-    {MetricCell("Month to date", Money(r.MonthToDate.CostUsd), $"{Num(r.MonthToDate.Requests)} requests")}
-    {MetricCell("All time", Money(r.AllTime.CostUsd), $"{Num(r.AllTime.Requests)} requests")}
+    {MetricCell("Month to date", Money(r.MonthToDate.CostUsd), $"{Num(r.MonthToDate.Requests)} requests", true)}
+    {MetricCell("All time", Money(r.AllTime.CostUsd), $"{Num(r.AllTime.Requests)} requests", false)}
   </tr>
 </table>");
 
@@ -190,9 +190,45 @@ public static class EmailTemplates
                 sb.Append($"<p style='margin:8px 0 0;color:{Subtle};font-size:12px'>and {r.Models.Count - 15} more</p>");
         }
 
+        sb.Append(CostProvenanceBlock(r));
         sb.Append(CreditBlock(r.Credit));
         sb.Append(FootClose(r));
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// States how the cost figure was arrived at. A number with no provenance is how
+    /// spend went unnoticed before, so the report never presents one silently.
+    /// </summary>
+    private static string CostProvenanceBlock(WeeklyUsageReport r)
+    {
+        if (r.CostSources.Count == 0) return "";
+
+        var labels = new Dictionary<string, string>
+        {
+            ["provider"] = "billed amount reported by the provider",
+            ["free_tier"] = "a provider's own free tier, genuinely zero",
+            ["estimated"] = "estimated from a cached price",
+            ["backfilled"] = "re-costed later at catalog prices",
+            ["legacy"] = "written before cost accounting was fixed, under-reported",
+            ["unknown"] = "no price and no billed amount available"
+        };
+
+        var rows = string.Join("", r.CostSources.OrderByDescending(kv => kv.Value).Select(kv => $@"<tr>
+  <td style='{TdLeft}'>{E(kv.Key)}</td>
+  <td style='{TdRight}'>{Num(kv.Value)}</td>
+  <td style='{TdRight}' colspan='2'><span style='color:{Subtle};font-size:12px'>{E(labels.GetValueOrDefault(kv.Key, ""))}</span></td>
+</tr>"));
+
+        var warning = r.HasUnreliableCost
+            ? $@"<p style='margin:8px 0 0;color:{Muted};font-size:12px;line-height:1.5'>
+  Only rows marked <strong>provider</strong> carry an amount the upstream actually billed.
+  Anything else is an approximation, so the totals above are a floor rather than an exact figure.
+</p>"
+            : "";
+
+        return SectionTitle("How these costs were measured")
+               + TableOpen("Source", "Requests", "", "") + rows + "</table>" + warning;
     }
 
     public static string WeeklyText(WeeklyUsageReport r)
@@ -259,6 +295,16 @@ public static class EmailTemplates
             sb.AppendLine("BY MODEL");
             foreach (var m in r.Models.Take(15))
                 sb.AppendLine($"  {m.ModelId,-40} {Num(m.Requests),7} req  {Money(m.CostUsd),12}");
+            sb.AppendLine();
+        }
+
+        if (r.CostSources.Count > 0)
+        {
+            sb.AppendLine("HOW THESE COSTS WERE MEASURED");
+            foreach (var kv in r.CostSources.OrderByDescending(kv => kv.Value))
+                sb.AppendLine($"  {kv.Key,-28} {Num(kv.Value),8} requests");
+            if (r.HasUnreliableCost)
+                sb.AppendLine("  Only 'provider' rows are amounts actually billed; the rest are approximations.");
             sb.AppendLine();
         }
 
@@ -341,7 +387,8 @@ public static class EmailTemplates
         "padding:10px 12px;border-top:1px solid #E3E7EE;font-size:14px;color:#101520;text-align:right;white-space:nowrap";
 
     private static string HeadOpen(string title, string subtitle) => $@"<!doctype html>
-<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'></head>
+<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<meta name='color-scheme' content='light dark'><meta name='supported-color-schemes' content='light dark'></head>
 <body style='margin:0;padding:0;background:{Surface}'>
 <table role='presentation' width='100%' cellpadding='0' cellspacing='0' style='background:{Surface};padding:24px 12px'>
 <tr><td align='center'>
@@ -385,11 +432,13 @@ public static class EmailTemplates
     private static string SectionTitle(string text) =>
         $"<h2 style='margin:24px 0 8px;font-size:15px;font-weight:600;color:{Ink}'>{E(text)}</h2>";
 
-    private static string MetricCell(string label, string value, string? note) => $@"
-<td width='50%' style='padding:14px 16px;border:1px solid {Line};border-radius:8px'>
-  <div style='font-size:13px;color:{Muted}'>{E(label)}</div>
-  <div style='margin-top:4px;font-size:24px;font-weight:600;color:{Ink};letter-spacing:-0.02em'>{E(value)}</div>
-  {(string.IsNullOrEmpty(note) ? "" : $"<div style='margin-top:2px;font-size:12px;color:{Subtle}'>{note}</div>")}
+    private static string MetricCell(string label, string value, string? note, bool isLeft) => $@"
+<td width='50%' valign='top' style='padding:0 {(isLeft ? "6px" : "0")} 12px {(isLeft ? "0" : "6px")}'>
+  <div style='padding:14px 16px;border:1px solid {Line};border-radius:8px;background:#FFFFFF'>
+    <div style='font-size:13px;color:{Muted}'>{E(label)}</div>
+    <div style='margin-top:4px;font-size:24px;font-weight:600;color:{Ink};letter-spacing:-0.02em'>{E(value)}</div>
+    {(string.IsNullOrEmpty(note) ? "" : $"<div style='margin-top:2px;font-size:12px;color:{Subtle}'>{note}</div>")}
+  </div>
 </td>";
 
     private static string ChangeNote(WeeklyUsageReport r)

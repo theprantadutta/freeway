@@ -35,6 +35,16 @@ public class UsageLogConfiguration : IEntityTypeConfiguration<UsageLog>
             .HasColumnName("model_tier")
             .HasMaxLength(10);
 
+        // Provenance of cost_usd. Null on rows written before cost accounting was fixed.
+        builder.Property(u => u.CostSource)
+            .HasColumnName("cost_source")
+            .HasMaxLength(20);
+
+        // The endpoint behind an aggregator, e.g. "DeepInfra" via OpenRouter.
+        builder.Property(u => u.UpstreamProvider)
+            .HasColumnName("upstream_provider")
+            .HasMaxLength(100);
+
         builder.Property(u => u.InputTokens)
             .HasColumnName("input_tokens")
             .HasDefaultValue(0);
