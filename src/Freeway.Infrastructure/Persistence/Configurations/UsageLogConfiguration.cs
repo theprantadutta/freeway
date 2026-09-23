@@ -30,6 +30,11 @@ public class UsageLogConfiguration : IEntityTypeConfiguration<UsageLog>
             .HasMaxLength(10)
             .IsRequired();
 
+        // Nullable: free/image rows and every row written before tiers existed have no tier.
+        builder.Property(u => u.ModelTier)
+            .HasColumnName("model_tier")
+            .HasMaxLength(10);
+
         builder.Property(u => u.InputTokens)
             .HasColumnName("input_tokens")
             .HasDefaultValue(0);

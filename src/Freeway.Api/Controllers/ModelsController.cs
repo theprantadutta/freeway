@@ -1,4 +1,5 @@
 using Freeway.Application.Features.Models.Queries;
+using Freeway.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Freeway.Api.Controllers;
@@ -32,6 +33,36 @@ public class ModelsController : BaseApiController
         var result = await Mediator.Send(new GetPaidModelsQuery());
         return HandleResult(result);
     }
+
+    /// <summary>
+    /// Selected model for a paid tier: low, moderate or premium.
+    /// </summary>
+    [HttpGet("/model/paid/{tier}")]
+    public async Task<ActionResult> GetSelectedPaidModelForTier(string tier)
+    {
+        if (!PaidTierExtensions.TryParseSlug(tier, out var parsed))
+            return BadRequest(new { detail = InvalidTierMessage(tier) });
+
+        var result = await Mediator.Send(new GetSelectedPaidModelQuery(parsed));
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// All models in a paid tier, ordered the way the chat fallback chain walks them:
+    /// curated models first, then the rest of the tier's price band cheapest first.
+    /// </summary>
+    [HttpGet("/models/paid/{tier}")]
+    public async Task<ActionResult> GetPaidModelsForTier(string tier)
+    {
+        if (!PaidTierExtensions.TryParseSlug(tier, out var parsed))
+            return BadRequest(new { detail = InvalidTierMessage(tier) });
+
+        var result = await Mediator.Send(new GetPaidModelsQuery(parsed));
+        return HandleResult(result);
+    }
+
+    internal static string InvalidTierMessage(string tier) =>
+        $"Unknown paid tier '{tier}'. Valid tiers are 'low', 'moderate' and 'premium'.";
 
     [HttpGet("/model/image")]
     public async Task<ActionResult> GetSelectedImageModel()

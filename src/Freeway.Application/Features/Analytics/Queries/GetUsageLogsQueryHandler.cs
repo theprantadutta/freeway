@@ -48,6 +48,7 @@ public class GetUsageLogsQueryHandler : IRequestHandler<GetUsageLogsQuery, Resul
             ProjectId = u.ProjectId,
             ModelId = u.ModelId,
             ModelType = u.ModelType,
+            ModelTier = u.ModelTier,
             InputTokens = u.InputTokens,
             OutputTokens = u.OutputTokens,
             ResponseTimeMs = u.ResponseTimeMs,

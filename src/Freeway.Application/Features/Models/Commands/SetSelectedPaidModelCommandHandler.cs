@@ -1,5 +1,6 @@
 using Freeway.Application.Common;
 using Freeway.Application.DTOs;
+using Freeway.Domain.Common;
 using Freeway.Domain.Interfaces;
 using MediatR;
 
@@ -23,14 +24,31 @@ public class SetSelectedPaidModelCommandHandler : IRequestHandler<SetSelectedPai
             return Task.FromResult(Result<SetModelResponseDto>.NotFound($"Paid model '{request.ModelId}' not found"));
         }
 
-        _modelCacheService.SetSelectedPaidModel(request.ModelId);
+        // An explicit tier must match the model. The untiered legacy call (PUT /admin/model/paid)
+        // targets whichever tier the model actually belongs to, so selecting any paid model keeps
+        // succeeding exactly as it did before tiers existed.
+        if (request.Tier is { } requestedTier && model.Tier is { } actualTier && requestedTier != actualTier)
+        {
+            return Task.FromResult(Result<SetModelResponseDto>.Failure(
+                $"Model '{model.Id}' belongs to the '{actualTier.ToSlug()}' tier, not '{requestedTier.ToSlug()}'.",
+                400));
+        }
+
+        var targetTier = request.Tier ?? model.Tier ?? PaidTier.Low;
+
+        if (!_modelCacheService.SetSelectedPaidModel(request.ModelId, targetTier))
+        {
+            return Task.FromResult(Result<SetModelResponseDto>.NotFound(
+                $"Paid model '{request.ModelId}' is not available in the '{targetTier.ToSlug()}' tier"));
+        }
 
         return Task.FromResult(Result<SetModelResponseDto>.Success(new SetModelResponseDto
         {
             Success = true,
             ModelId = model.Id,
             ModelName = model.Name,
-            Message = $"Selected paid model set to '{model.Name}'"
+            Tier = targetTier.ToSlug(),
+            Message = $"Selected {targetTier.ToSlug()} paid model set to '{model.Name}'"
         }));
     }
 }

@@ -1,5 +1,6 @@
 using Freeway.Application.Common;
 using Freeway.Application.DTOs;
+using Freeway.Domain.Common;
 using Freeway.Domain.Interfaces;
 using MediatR;
 
@@ -16,11 +17,15 @@ public class GetSelectedPaidModelQueryHandler : IRequestHandler<GetSelectedPaidM
 
     public Task<Result<SelectedModelDto>> Handle(GetSelectedPaidModelQuery request, CancellationToken cancellationToken)
     {
-        var model = _modelCacheService.GetSelectedPaidModel();
+        var tier = request.Tier ?? PaidTier.Low;
+        var model = _modelCacheService.GetSelectedPaidModel(tier);
 
         if (model == null)
         {
-            return Task.FromResult(Result<SelectedModelDto>.ServiceUnavailable("No paid models available"));
+            return Task.FromResult(Result<SelectedModelDto>.ServiceUnavailable(
+                request.Tier is null
+                    ? "No paid models available"
+                    : $"No models available for the '{tier.ToSlug()}' paid tier"));
         }
 
         return Task.FromResult(Result<SelectedModelDto>.Success(new SelectedModelDto
@@ -33,7 +38,9 @@ public class GetSelectedPaidModelQueryHandler : IRequestHandler<GetSelectedPaidM
             {
                 Prompt = model.PromptPrice,
                 Completion = model.CompletionPrice
-            }
+            },
+            Tier = model.Tier?.ToSlug(),
+            IsCurated = model.IsCurated
         }));
     }
 }

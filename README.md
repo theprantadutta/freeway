@@ -14,12 +14,13 @@ Freeway is a full-featured AI Gateway built with .NET 10 that:
 
 ## Features
 
-- **OpenAI-Compatible Chat Endpoint**: `POST /chat/completions` with model selection (`free`, `paid`, `image`, or specific model ID)
+- **OpenAI-Compatible Chat Endpoint**: `POST /chat/completions` with model selection (`free`, `paid`, `paid:low`, `paid:moderate`, `paid:premium`, `image`, or specific model ID)
 - **Multi-Provider Support**: Fallback across 8 AI providers for reliability
 - **Project Management**: Create projects with individual API keys, rate limits, and metadata
 - **Usage Tracking**: Logs all requests with tokens, costs, and response times
 - **Admin Analytics**: Usage summaries, per-project stats, and detailed logs
 - **Model Selection**: Auto-selects best free model (by context), cheapest paid model, and cheapest image generation model (by price)
+- **Paid Tiers**: `paid:low`, `paid:moderate` and `paid:premium` route to curated models per cost/capability tier, each with its own fallback chain
 - **Image Generation**: Supports image generation models via `model: "image"` with auto-selection of cheapest option
 - **Daily Refresh**: Models updated via Hangfire background jobs
 - **PostgreSQL Storage**: Persistent storage for projects, users, and usage data
@@ -97,9 +98,39 @@ OpenAI-compatible chat completion endpoint.
 
 **Model options:**
 - `"free"` - Use best free model (auto-selected)
-- `"paid"` - Use cheapest paid model (auto-selected)
+- `"paid"` - Alias for `"paid:low"` (unchanged behaviour)
+- `"paid:low"` - Cheapest paid models
+- `"paid:moderate"` - Balanced cost/capability models
+- `"paid:premium"` - Highest-capability models
 - `"image"` - Use cheapest image generation model (auto-selected)
 - `"<model_id>"` - Use specific model by ID
+
+### Paid Tiers
+
+Each tier is defined by two things, in priority order:
+
+1. **A curated preference list** - an ordered set of model IDs. The first one the upstream
+   catalog still offers wins. This is what makes `premium` mean *a capable model* rather than
+   merely *an expensive one*.
+2. **A price band** - used to classify every other model, and to supply the fallback chain
+   when none of the curated models are available.
+
+| Tier | Price band (combined USD/Mtok) | Default head | Curated? |
+|------|-------------------------------|--------------|----------|
+| `paid:low` | `< 1.00` | cheapest available | no - pure cheapest-first |
+| `paid:moderate` | `1.00 - 10.00` | `openai/gpt-5-mini` | yes |
+| `paid:premium` | `> 10.00` | `openai/gpt-5.6-sol` | yes |
+
+A model named in a curated list belongs to that tier regardless of its price, so a tier head
+never drifts because upstream changed a number. Every tier keeps the same fallback behaviour
+as before: the selected model first, then `PAID_FALLBACK_COUNT` backups from the rest of the
+tier, with rate-limited models pushed to the back of the queue.
+
+Tiers are configurable via `PAID_TIER_LOW_MAX`, `PAID_TIER_MODERATE_MAX`,
+`PAID_TIER_MODERATE_MODELS` and `PAID_TIER_PREMIUM_MODELS` (see `.env.example`).
+
+> **Note:** `:batch` model variants are excluded from every tier. They are priced for
+> asynchronous batch submission and are not valid targets for a synchronous chat endpoint.
 
 **Response:**
 ```json
@@ -125,13 +156,15 @@ OpenAI-compatible chat completion endpoint.
 ### Model Endpoints (Admin or Project Key)
 
 ```bash
-GET /model/free      # Best free model
-GET /model/paid      # Cheapest paid model
-GET /model/image     # Cheapest image generation model
-GET /models/free     # All free models (ranked by context)
-GET /models/paid     # All paid models (ranked by price)
-GET /models/image    # All image generation models (ranked by price)
-GET /health          # Service health check
+GET /model/free              # Best free model
+GET /model/paid              # Selected paid model (low tier)
+GET /model/paid/{tier}       # Selected model for low | moderate | premium
+GET /model/image             # Cheapest image generation model
+GET /models/free             # All free models (ranked by context)
+GET /models/paid             # All paid models (ranked by price)
+GET /models/paid/{tier}      # Models in one tier, in fallback-chain order
+GET /models/image            # All image generation models (ranked by price)
+GET /health                  # Service health check
 ```
 
 ### Authentication Endpoints (Public/JWT)
@@ -184,10 +217,13 @@ POST   /admin/projects/{id}/rotate-key  # Rotate API key
 #### Model Selection
 
 ```bash
-PUT /admin/model/free    # Set selected free model
-PUT /admin/model/paid    # Set selected paid model
-PUT /admin/model/image   # Set selected image generation model
+PUT /admin/model/free          # Set selected free model
+PUT /admin/model/paid          # Set selected paid model (targets the model's own tier)
+PUT /admin/model/paid/{tier}   # Set selected model for low | moderate | premium
+PUT /admin/model/image         # Set selected image generation model
 ```
+
+The model must belong to the tier being set; a mismatch returns `400`.
 
 **Request:**
 ```json
@@ -231,6 +267,10 @@ Environment variables (see `.env.example`):
 | `COHERE_API_KEY` | No | Cohere API key (for fallback) |
 | `HUGGINGFACE_API_KEY` | No | HuggingFace API key (for fallback) |
 | `PAID_FALLBACK_COUNT` | No | Backup models to try after the primary for `paid`/`image` requests (default: 3) |
+| `PAID_TIER_LOW_MAX` | No | Upper bound of the `paid:low` price band, combined USD/Mtok (default: 1.0) |
+| `PAID_TIER_MODERATE_MAX` | No | Upper bound of the `paid:moderate` price band, combined USD/Mtok (default: 10.0) |
+| `PAID_TIER_MODERATE_MODELS` | No | Comma-separated curated model IDs for `paid:moderate`, best-first |
+| `PAID_TIER_PREMIUM_MODELS` | No | Comma-separated curated model IDs for `paid:premium`, best-first |
 | `MODEL_COOLDOWN_SECONDS` | No | How long a rate-limited (429) model is skipped before being retried (default: 60) |
 | `OPENROUTER_PROVIDER_SORT` | No | OpenRouter endpoint sort: `throughput`, `price`, or `latency` (default: `throughput`). Empty disables sorting |
 | `OPENROUTER_ALLOW_FALLBACKS` | No | Let OpenRouter route around a failed/throttled provider to another serving the same model (default: true) |
@@ -378,14 +418,16 @@ The Next.js web panel provides:
 
 ### Dashboard
 - Stats overview: Total projects, active projects, requests today, monthly cost
-- Selected models display (free, paid, and image)
+- Selected models display (free, all three paid tiers, and image)
 - Quick navigation to all features
 
 ### Models
 - Browse all available models (free, paid, and image tabs)
+- Paid tab has Low / Moderate / Premium sub-tabs, listed in fallback-chain order
+- Curated models are badged so you can see which are tier-preferred
 - Search models by name or ID
 - View model details (context length, pricing, capabilities)
-- Select active free/paid/image models
+- Select active free/paid/image models, per tier for paid
 
 ### Projects
 - Create, edit, and delete projects
@@ -489,12 +531,13 @@ To customize domains, edit the Traefik labels in `compose.yml`.
 
 2. **Model categorization**:
    - Free models: Have `:free` suffix or zero pricing
-   - Paid models: Everything else (filtered for valid pricing)
+   - Paid models: Everything else (valid pricing, context >= 8000, excluding `/auto`,
+     `router` and `:batch` variants), then split into low/moderate/premium tiers
    - Image models: Fetched from OpenRouter with `?output_modalities=image`
 
 3. **Model selection**:
    - Free: Best = largest context length
-   - Paid: Best = lowest combined price
+   - Paid: Per tier, the first available curated model, else the cheapest in the tier's band
    - Image: Best = lowest price from image generation models
 
 4. **Background jobs**:

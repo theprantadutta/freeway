@@ -1,5 +1,6 @@
 using Freeway.Application.Common;
 using Freeway.Application.DTOs;
+using Freeway.Domain.Common;
 using Freeway.Domain.Entities;
 using Freeway.Domain.Interfaces;
 using MediatR;
@@ -39,6 +40,16 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         _logger = logger;
     }
 
+    /// <summary>
+    /// Outcome of turning the requested "model" value into something callable.
+    /// </summary>
+    private sealed record ResolvedModel(
+        string? ModelId,
+        string ModelType,
+        CachedModel? Model,
+        string? Error = null,
+        PaidTier? Tier = null);
+
     public async Task<Result<ChatCompletionResponseDto>> Handle(CreateChatCompletionCommand request, CancellationToken cancellationToken)
     {
         // Convert messages
@@ -63,6 +74,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         ChatCompletionResult result;
         string modelId;
         string modelType;
+        string? modelTier = null;
         CachedModel? model = null;
 
         // Use orchestrator for "free" requests, direct OpenRouter for "paid" or specific models
@@ -79,16 +91,17 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             var resolved = ResolveModel(request.Model);
 
             // Check for validation error
-            if (resolved.error != null)
+            if (resolved.Error != null)
             {
-                return Result<ChatCompletionResponseDto>.Failure(resolved.error, 400);
+                return Result<ChatCompletionResponseDto>.Failure(resolved.Error, 400);
             }
 
-            modelType = resolved.modelType;
+            modelType = resolved.ModelType;
+            modelTier = resolved.Tier?.ToSlug();
 
-            // Build an ordered candidate list. For the "paid"/"image" virtual models we
-            // include backup models (next cheapest) so one rate-limited/failing model does
-            // not fail the whole request. Specific model IDs keep single-attempt semantics.
+            // Build an ordered candidate list. For the "paid"/"paid:<tier>"/"image" virtual
+            // models we include backup models so one rate-limited/failing model does not fail
+            // the whole request. Specific model IDs keep single-attempt semantics.
             var candidates = BuildPaidCandidates(request.Model, resolved);
 
             if (candidates.Count == 0)
@@ -101,7 +114,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         }
 
         // Log usage in background (fire-and-forget with its own scope)
-        _ = Task.Run(() => LogUsageInBackgroundAsync(request, modelId, modelType, model, result));
+        _ = Task.Run(() => LogUsageInBackgroundAsync(request, modelId, modelType, modelTier, model, result));
 
         if (!result.Success)
         {
@@ -138,13 +151,14 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         int.TryParse(Environment.GetEnvironmentVariable("PAID_FALLBACK_COUNT"), out var n) && n >= 0 ? n : 3;
 
     /// <summary>
-    /// Builds the ordered list of models to attempt. For the "paid" and "image" virtual
-    /// models the selected model is tried first, followed by the next cheapest models as
-    /// backups. Specific model IDs resolve to a single candidate (no silent substitution).
+    /// Builds the ordered list of models to attempt. For the "paid", "paid:&lt;tier&gt;" and
+    /// "image" virtual models the selected model is tried first, followed by the rest of that
+    /// tier's chain as backups. Specific model IDs resolve to a single candidate (no silent
+    /// substitution).
     /// </summary>
     private List<(string modelId, CachedModel? model)> BuildPaidCandidates(
         string requestedModel,
-        (string? modelId, string modelType, CachedModel? model, string? error) resolved)
+        ResolvedModel resolved)
     {
         var candidates = new List<(string modelId, CachedModel? model)>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -156,10 +170,12 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             candidates.Add((m.Id, m));
         }
 
-        if (requestedModel.Equals("paid", StringComparison.OrdinalIgnoreCase))
+        // "paid" and "paid:<tier>" both land here; bare "paid" resolves to the Low tier so its
+        // behaviour is unchanged.
+        if (PaidTierExtensions.TryParseModel(requestedModel, out var tier))
         {
-            Add(resolved.model ?? _modelCacheService.GetSelectedPaidModel());
-            foreach (var m in _modelCacheService.GetPaidModels()) // ranked cheapest-first
+            Add(resolved.Model ?? _modelCacheService.GetSelectedPaidModel(tier));
+            foreach (var m in _modelCacheService.GetPaidModels(tier)) // curated first, then cheapest
             {
                 if (candidates.Count > PaidFallbackCount) break;
                 Add(m);
@@ -167,17 +183,17 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         }
         else if (requestedModel.Equals("image", StringComparison.OrdinalIgnoreCase))
         {
-            Add(resolved.model ?? _modelCacheService.GetSelectedImageModel());
+            Add(resolved.Model ?? _modelCacheService.GetSelectedImageModel());
             foreach (var m in _modelCacheService.GetImageModels()) // ranked cheapest-first
             {
                 if (candidates.Count > PaidFallbackCount) break;
                 Add(m);
             }
         }
-        else if (resolved.modelId != null)
+        else if (resolved.ModelId != null)
         {
             // Specific model ID - single attempt, no substitution.
-            candidates.Add((resolved.modelId, resolved.model));
+            candidates.Add((resolved.ModelId, resolved.Model));
             return candidates;
         }
 
@@ -239,25 +255,35 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
                 lastId, lastModel);
     }
 
-    private (string? modelId, string modelType, CachedModel? model, string? error) ResolveModel(string requestedModel)
+    private ResolvedModel ResolveModel(string requestedModel)
     {
-        // Handle "free" and "paid" keywords
+        // Handle "free" keyword
         if (requestedModel.Equals("free", StringComparison.OrdinalIgnoreCase))
         {
             var model = _modelCacheService.GetSelectedFreeModel();
-            return (model?.Id, "free", model, null);
+            return new ResolvedModel(model?.Id, "free", model);
         }
 
-        if (requestedModel.Equals("paid", StringComparison.OrdinalIgnoreCase))
+        // Handle "paid" and "paid:<tier>". Bare "paid" maps to the Low tier, so callers that
+        // predate tiers keep exactly their previous behaviour.
+        if (PaidTierExtensions.TryParseModel(requestedModel, out var tier))
         {
-            var model = _modelCacheService.GetSelectedPaidModel();
-            return (model?.Id, "paid", model, null);
+            var model = _modelCacheService.GetSelectedPaidModel(tier);
+            return new ResolvedModel(model?.Id, "paid", model, null, tier);
+        }
+
+        // A "paid:" prefix that did not parse is a caller mistake worth reporting rather than
+        // silently falling through to the specific-model lookup.
+        if (requestedModel.StartsWith("paid:", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ResolvedModel(null, "unknown", null,
+                $"Unknown paid tier '{requestedModel}'. Valid values are 'paid', 'paid:low', 'paid:moderate' and 'paid:premium'.");
         }
 
         if (requestedModel.Equals("image", StringComparison.OrdinalIgnoreCase))
         {
             var model = _modelCacheService.GetSelectedImageModel();
-            return (model?.Id, "image", model, null);
+            return new ResolvedModel(model?.Id, "image", model);
         }
 
         // Look up specific model in legacy cache (OpenRouter models)
@@ -265,7 +291,8 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         if (cachedModel != null)
         {
             var type = cachedModel.IsImageModel ? "image" : cachedModel.IsFree ? "free" : "paid";
-            return (cachedModel.Id, type, cachedModel, null);
+            // Attribute a directly-requested paid model to the tier it belongs to.
+            return new ResolvedModel(cachedModel.Id, type, cachedModel, null, cachedModel.Tier);
         }
 
         // Check provider model cache for strict validation
@@ -274,7 +301,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         {
             _logger.LogDebug("Model '{Model}' found on providers: {Providers}",
                 requestedModel, string.Join(", ", providers));
-            return (requestedModel, "specific", null, null);
+            return new ResolvedModel(requestedModel, "specific", null);
         }
 
         // Check if it looks like an OpenRouter model format (contains /)
@@ -283,7 +310,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             // OpenRouter format - check if it's in the openrouter provider cache
             if (_providerModelCache.IsValidModel("openrouter", requestedModel))
             {
-                return (requestedModel, "paid", null, null);
+                return new ResolvedModel(requestedModel, "paid", null);
             }
         }
 
@@ -293,18 +320,20 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         {
             // Cache is populated, so this is a genuinely invalid model
             _logger.LogWarning("Model '{Model}' not found in any provider cache", requestedModel);
-            return (null, "unknown", null, $"Model '{requestedModel}' is not available. Use GET /v1/models to see available models.");
+            return new ResolvedModel(null, "unknown", null,
+                $"Model '{requestedModel}' is not available. Use GET /v1/models to see available models.");
         }
 
         // Cache not yet populated - allow pass-through for backwards compatibility
         _logger.LogDebug("Provider model cache not yet populated, allowing pass-through for '{Model}'", requestedModel);
-        return (requestedModel, "unknown", null, null);
+        return new ResolvedModel(requestedModel, "unknown", null);
     }
 
     private async Task LogUsageInBackgroundAsync(
         CreateChatCompletionCommand request,
         string modelId,
         string modelType,
+        string? modelTier,
         CachedModel? model,
         ChatCompletionResult result)
     {
@@ -332,6 +361,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
                 ProjectId = request.ProjectId,
                 ModelId = modelId,
                 ModelType = modelType,
+                ModelTier = modelTier,
                 InputTokens = result.Usage.PromptTokens,
                 OutputTokens = result.Usage.CompletionTokens,
                 ResponseTimeMs = result.ResponseTimeMs,

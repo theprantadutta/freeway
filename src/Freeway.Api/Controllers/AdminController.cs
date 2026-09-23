@@ -2,6 +2,7 @@ using Freeway.Api.Attributes;
 using Freeway.Application.DTOs;
 using Freeway.Application.Features.Analytics.Queries;
 using Freeway.Application.Features.Models.Commands;
+using Freeway.Domain.Common;
 using Freeway.Application.Features.Projects.Commands;
 using Freeway.Application.Features.Projects.Queries;
 using Freeway.Domain.Interfaces;
@@ -93,6 +94,20 @@ public class AdminController : BaseApiController
     public async Task<ActionResult> SetSelectedPaidModel([FromBody] SetModelRequest request)
     {
         var result = await Mediator.Send(new SetSelectedPaidModelCommand(request.ModelId));
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Sets the selected model for one paid tier: low, moderate or premium.
+    /// The model must belong to that tier.
+    /// </summary>
+    [HttpPut("model/paid/{tier}")]
+    public async Task<ActionResult> SetSelectedPaidModelForTier(string tier, [FromBody] SetModelRequest request)
+    {
+        if (!PaidTierExtensions.TryParseSlug(tier, out var parsed))
+            return BadRequest(new { detail = ModelsController.InvalidTierMessage(tier) });
+
+        var result = await Mediator.Send(new SetSelectedPaidModelCommand(request.ModelId, parsed));
         return HandleResult(result);
     }
 

@@ -25,6 +25,9 @@ public class ModelUsageStatsDto
 {
     public string ModelId { get; set; } = string.Empty;
     public string ModelType { get; set; } = string.Empty;
+
+    /// <summary>Paid tier slug, or null for free/image traffic and for pre-tier rows.</summary>
+    public string? ModelTier { get; set; }
     public int Requests { get; set; }
     public int Tokens { get; set; }
     public decimal CostUsd { get; set; }
@@ -51,6 +54,9 @@ public class UsageLogDto
     public Guid ProjectId { get; set; }
     public string ModelId { get; set; } = string.Empty;
     public string ModelType { get; set; } = string.Empty;
+
+    /// <summary>Paid tier slug, or null for free/image traffic and for pre-tier rows.</summary>
+    public string? ModelTier { get; set; }
     public int InputTokens { get; set; }
     public int OutputTokens { get; set; }
     public int ResponseTimeMs { get; set; }

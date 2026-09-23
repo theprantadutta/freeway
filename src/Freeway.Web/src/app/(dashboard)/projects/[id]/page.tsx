@@ -369,6 +369,11 @@ export default function ProjectDetailsPage() {
                               >
                                 {model.model_type}
                               </Badge>
+                              {model.model_tier && (
+                                <Badge variant="info" size="sm" className="ml-1">
+                                  {model.model_tier}
+                                </Badge>
+                              )}
                             </td>
                             <td className="py-3 px-2 text-right text-gray-900 dark:text-gray-100">
                               {formatNumber(model.requests)}
@@ -476,6 +481,11 @@ function LogCard({ log }: { log: UsageLog }) {
               >
                 {log.model_type}
               </Badge>
+              {log.model_tier && (
+                <Badge variant="info" size="sm">
+                  {log.model_tier}
+                </Badge>
+              )}
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               {formatRelativeTime(log.created_at)} • {log.total_tokens} tokens

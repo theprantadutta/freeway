@@ -56,6 +56,18 @@ export interface RotateKeyResult {
 }
 
 // Model types
+
+/** Cost/capability tier for the "paid" virtual model. */
+export type PaidTier = "low" | "moderate" | "premium";
+
+export const PAID_TIERS: PaidTier[] = ["low", "moderate", "premium"];
+
+export const PAID_TIER_LABELS: Record<PaidTier, string> = {
+  low: "Low",
+  moderate: "Moderate",
+  premium: "Premium",
+};
+
 export interface ModelInfo {
   model_id: string;
   model_name: string;
@@ -66,12 +78,20 @@ export interface ModelInfo {
     completion: string;
   };
   rank?: number;
+  tier?: PaidTier;
+  is_curated?: boolean;
 }
 
 export interface SelectedModel {
   model_id: string;
   model_name?: string;
   context_length?: number;
+  tier?: PaidTier;
+  is_curated?: boolean;
+  pricing?: {
+    prompt: string;
+    completion: string;
+  };
 }
 
 // Analytics types
@@ -98,6 +118,7 @@ export interface UsageSummary {
 export interface ModelUsageStats {
   model_id: string;
   model_type: string;
+  model_tier?: PaidTier | null;
   requests: number;
   tokens: number;
   cost_usd: number;
@@ -114,6 +135,7 @@ export interface UsageLog {
   project_id: string;
   model_id: string;
   model_type: string;
+  model_tier?: PaidTier | null;
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
