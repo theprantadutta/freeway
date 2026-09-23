@@ -31,7 +31,29 @@ public interface ILocalClaudeService
     Task<ChatCompletionResult> CompleteAsync(
         List<ChatMessage> messages,
         ChatCompletionOptions? options = null,
+        LocalClaudePriority priority = LocalClaudePriority.Premium,
         CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// What a caller is entitled to ask of the subscription.
+/// </summary>
+public enum LocalClaudePriority
+{
+    /// <summary>
+    /// Queues, waits, and may spend the whole hourly budget. The premium lane
+    /// displaces frontier-model pricing, so this is where the subscription pays for
+    /// itself and it is never held back for a cheaper lane.
+    /// </summary>
+    Premium,
+
+    /// <summary>
+    /// Rides along on spare capacity only. Refused the instant the bridge is busy or
+    /// the spillover share of the budget is spent, and given a short deadline, so a
+    /// cheap lane can never turn the subscription into latency for itself or crowd
+    /// premium out of it.
+    /// </summary>
+    Spillover
 }
 
 /// <summary>
@@ -65,6 +87,16 @@ public class LocalClaudeHealth
     public string? Model { get; set; }
     public DateTime? CheckedAt { get; set; }
 
+    /// <summary>A call was in flight or queued when this was taken.</summary>
+    public bool Busy { get; set; }
+
+    /// <summary>
+    /// Where the hourly token budget stands. The ceiling is configured rather than
+    /// discovered -- the CLI reports what a call used but nothing about the plan's
+    /// limit -- so this is how you find out whether yours is set sensibly.
+    /// </summary>
+    public LocalClaudeBudget? Budget { get; set; }
+
     public bool CanServe => State == LocalClaudeState.Available;
 
     /// <summary>One line for a log or an email, explaining the current verdict.</summary>
@@ -75,4 +107,20 @@ public class LocalClaudeHealth
         LocalClaudeState.Unavailable => $"unavailable: {Detail ?? "no detail"}",
         _ => "not checked yet"
     };
+}
+
+/// <summary>A rolling hour of subscription spend, as the bridge sees it.</summary>
+public class LocalClaudeBudget
+{
+    public long Limit { get; set; }
+    public long Used { get; set; }
+    public long Remaining { get; set; }
+
+    /// <summary>The part of the budget spillover may use; the rest is premium's.</summary>
+    public long SpilloverLimit { get; set; }
+
+    /// <summary>Tokens the bridge expects the next call to cost, learned from recent ones.</summary>
+    public long Estimate { get; set; }
+
+    public double UsedPercent => Limit == 0 ? 0 : (double)Used / Limit * 100;
 }

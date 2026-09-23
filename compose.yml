@@ -51,6 +51,11 @@ services:
       - BRIDGE_MAX_CONCURRENT=1
       - BRIDGE_TIMEOUT_MS=120000
       - BRIDGE_HEALTH_TTL_MS=600000
+      # How much of the subscription this may spend per rolling hour, and the share
+      # of it the moderate lane may take. The ceiling cannot be discovered from the
+      # CLI, so it is a budget you set -- see deploy/claude-bridge/README.md.
+      - BRIDGE_HOURLY_TOKEN_BUDGET=${BRIDGE_HOURLY_TOKEN_BUDGET:-200000}
+      - BRIDGE_SPILLOVER_SHARE=${BRIDGE_SPILLOVER_SHARE:-0.6}
     restart: unless-stopped
     networks:
       - internal

@@ -62,6 +62,46 @@ either way). Not worth a standing pool of processes.
 Of the ~3.5s a request takes, about 2s is the API call itself and the rest is CLI
 startup. Both are the CLI's, not the bridge's.
 
+## Who may use it, and how much
+
+Two lanes reach the bridge, deliberately on different terms.
+
+| | `paid:premium` | `paid:moderate` |
+|---|---|---|
+| queues when busy | yes | **never** |
+| deadline | 150s | 5s |
+| share of the hourly budget | all of it | 60% (`BRIDGE_SPILLOVER_SHARE`) |
+
+The asymmetry is the whole design. Premium displaces frontier-model pricing, so a
+request served here avoids around $0.025; moderate displaces models costing a
+fraction of a cent. Both consume the same subscription quota, so premium is worth
+roughly 25x more per unit of the scarce resource and is never made to wait behind
+the cheaper lane. Moderate rides along on capacity that would otherwise sit idle,
+and the moment that capacity is in question it is refused and the request goes to
+the model it would have used anyway.
+
+Refusals are instantaneous and happen before the queue, so spillover can never turn
+into latency. They come back with `reasonCode` of `busy` or `budget`, which the
+caller treats as the bridge working rather than failing -- a refused spillover must
+not mark the bridge unhealthy, or cheap traffic would lock premium out of the
+subscription entirely.
+
+### The budget is set, not discovered
+
+`BRIDGE_HOURLY_TOKEN_BUDGET` caps spend over a rolling hour. It has to be
+configured, because the ceiling cannot be read: the CLI reports what a call used but
+carries no rate, limit, remaining or reset field anywhere in its output. There is
+nothing to query.
+
+At roughly 9.4k tokens a call, the 200,000 default is about 21 calls an hour, of
+which moderate may have 12. Probes count against it too -- they are real calls on
+the same subscription. `GET /admin/local-claude` reports where the hour stands, and
+every invocation logs its own consumption, so size it from observed numbers rather
+than from this paragraph.
+
+This is the proactive half. The reactive half is unchanged: a genuine rate-limit
+reply still marks the bridge unavailable and takes both lanes off it.
+
 ## Install
 
 ### As a compose service (recommended)
@@ -153,6 +193,10 @@ curl -s -H "Authorization: Bearer $BRIDGE_TOKEN" http://172.17.0.1:8787/health
 |---|---|---|
 | `GET` | `/health` | `{ ok, state, detail, latencyMs, model, checkedAt, cached }` |
 | `POST` | `/complete` | `{ ok, text, model, listCostUsd, promptTokens, completionTokens, durationMs }` |
+
+`/complete` takes an optional `priority` of `premium` (the default, so a caller that
+sends nothing keeps the old behaviour) or `spillover`. `/health` additionally reports
+`busy` and a `budget` of `{ limit, used, remaining, spilloverLimit, estimate }`.
 
 `state` is one of `available`, `rate_limited`, `unavailable`. `listCostUsd` is what the
 same work would have cost at API list price — on a subscription it is the amount

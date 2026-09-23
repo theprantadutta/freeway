@@ -26,6 +26,31 @@ const HEALTH_TTL_MS = Number(process.env.BRIDGE_HEALTH_TTL_MS || 10 * 60 * 1000)
 const MAX_CONCURRENT = Number(process.env.BRIDGE_MAX_CONCURRENT || 1);
 const WORKDIR = process.env.BRIDGE_WORKDIR || "/tmp";
 
+/**
+ * How much of the Claude subscription this bridge is allowed to spend per hour.
+ *
+ * It has to be configured, because it cannot be discovered: the CLI reports what a
+ * call used but nothing about the plan's ceiling or what is left of it -- there is no
+ * rate, limit, remaining or reset field anywhere in its output. So this is a budget
+ * you set, not a limit the bridge reads.
+ *
+ * The default is deliberately conservative. Measure real consumption in the log lines
+ * this prints and raise it if there is headroom; the reactive guard is separate and
+ * still there, since a genuine rate-limit reply marks the bridge unavailable.
+ */
+const HOURLY_TOKEN_BUDGET = Number(process.env.BRIDGE_HOURLY_TOKEN_BUDGET || 200000);
+
+/**
+ * The share of that budget spillover traffic may use, leaving the rest for premium.
+ * Premium is where the subscription earns its keep -- it displaces frontier-model
+ * pricing, where spillover only displaces cheap models -- so it keeps a reserve that
+ * spillover cannot touch however busy the cheaper lane gets.
+ */
+const SPILLOVER_SHARE = Number(process.env.BRIDGE_SPILLOVER_SHARE || 0.6);
+
+/** Assumed tokens per call before one has been measured. */
+const DEFAULT_CALL_TOKENS = 9500;
+
 // A token is required whenever the bridge is reachable from outside its own
 // network. On a private compose network with no published port there is nothing to
 // defend against, so it is optional there — but say so out loud, because an open
@@ -35,6 +60,73 @@ if (!TOKEN) {
     "BRIDGE_TOKEN is not set: running without authentication. " +
     "Only do this when the service publishes no ports and sits on an internal network."
   );
+}
+
+/**
+ * A rolling hour of token spend, so the budget is a moving window rather than a
+ * counter that resets on the hour and lets an hour's worth of traffic through twice
+ * either side of the boundary.
+ */
+const ledger = [];
+
+function budget() {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  while (ledger.length && ledger[0].at < cutoff) ledger.shift();
+
+  const used = ledger.reduce((sum, e) => sum + e.tokens, 0);
+  // What a call actually costs, learned from recent ones: the estimate only has to
+  // be good enough to stop the budget being overshot by a whole request.
+  const recent = ledger.slice(-10);
+  const estimate = recent.length
+    ? Math.round(recent.reduce((sum, e) => sum + e.tokens, 0) / recent.length)
+    : DEFAULT_CALL_TOKENS;
+
+  return {
+    limit: HOURLY_TOKEN_BUDGET,
+    used,
+    remaining: Math.max(0, HOURLY_TOKEN_BUDGET - used),
+    spilloverLimit: Math.round(HOURLY_TOKEN_BUDGET * SPILLOVER_SHARE),
+    estimate,
+  };
+}
+
+function record(tokens) {
+  ledger.push({ at: Date.now(), tokens });
+}
+
+/**
+ * Whether a call of this priority may run right now.
+ *
+ * Spillover is the cheap lane riding along on spare capacity, so it is refused the
+ * moment it would have to wait or would eat into premium's reserve. Refusing is
+ * instantaneous and the caller falls straight through to a paid model, which is the
+ * whole point: spillover must never turn into latency.
+ */
+function admit(priority) {
+  const b = budget();
+
+  if (priority === "spillover") {
+    if (inFlight > 0 || waiting.length > 0) {
+      return { ok: false, reasonCode: "busy", reason: "bridge busy; spillover does not queue" };
+    }
+    if (b.used + b.estimate > b.spilloverLimit) {
+      return {
+        ok: false,
+        reasonCode: "budget",
+        reason: `spillover budget spent (${b.used}/${b.spilloverLimit} tokens this hour)`,
+      };
+    }
+    return { ok: true };
+  }
+
+  if (b.used + b.estimate > b.limit) {
+    return {
+      ok: false,
+      reasonCode: "budget",
+      reason: `hourly token budget spent (${b.used}/${b.limit})`,
+    };
+  }
+  return { ok: true };
 }
 
 // Claude Code is an interactive developer tool, not a server. Running several at
@@ -217,6 +309,12 @@ function runClaude(prompt, systemPrompt) {
       // fault -- but a jump in it means the prefix changed, and that is worth chasing.
       const created = usage.cache_creation_input_tokens || 0;
       const read = usage.cache_read_input_tokens || 0;
+
+      // Charged against the hourly budget. Probes count too: they are real calls on
+      // the same subscription, and a budget that ignored them would drift.
+      const spent =
+        (usage.input_tokens || 0) + created + read + (usage.output_tokens || 0);
+      record(spent);
       console.log(
         `claude ok in ${durationMs}ms, cache created=${created} read=${read}, $${(parsed.total_cost_usd ?? 0).toFixed(6)} list`
       );
@@ -345,7 +443,14 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && req.url.startsWith("/health")) {
     try {
-      return send(res, 200, await probe());
+      const health = await probe();
+      // busy and budget are read after the probe, so they describe the bridge as it
+      // is now rather than as it was when the cached verdict was taken.
+      return send(res, 200, {
+        ...health,
+        busy: inFlight > 0 || waiting.length > 0,
+        budget: budget(),
+      });
     } catch (err) {
       return send(res, 200, { ok: false, state: "unavailable", detail: err.message });
     }
@@ -362,6 +467,18 @@ const server = http.createServer(async (req, res) => {
     const messages = Array.isArray(body.messages) ? body.messages : [];
     if (messages.length === 0) {
       return send(res, 400, { ok: false, reason: "messages is required" });
+    }
+
+    // "premium" is the default so an older caller that sends no priority keeps its
+    // current behaviour exactly.
+    const priority = body.priority === "spillover" ? "spillover" : "premium";
+
+    // Checked before the queue, never inside it: a refused spillover call has to come
+    // back immediately so the caller can use a paid model, rather than waiting.
+    const verdict = admit(priority);
+    if (!verdict.ok) {
+      console.log(`${priority} refused: ${verdict.reason}`);
+      return send(res, 200, { ok: false, reason: verdict.reason, reasonCode: verdict.reasonCode });
     }
 
     const { system, prompt } = render(messages);
