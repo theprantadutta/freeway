@@ -18,6 +18,7 @@ import { Skeleton, SkeletonCard } from "@/components/ui/skeleton";
 import { analyticsApi } from "@/lib/api/analytics";
 import { modelsApi } from "@/lib/api/models";
 import { formatCurrency, formatNumber } from "@/lib/utils/format";
+import { PAID_TIER_LABELS, type PaidTier } from "@/lib/types";
 
 export default function DashboardPage() {
   const { data: summary, isLoading: summaryLoading } = useQuery({
@@ -30,10 +31,26 @@ export default function DashboardPage() {
     queryFn: () => modelsApi.getSelectedFreeModel(),
   });
 
-  const { data: paidModel, isLoading: paidModelLoading } = useQuery({
-    queryKey: ["model", "paid"],
-    queryFn: () => modelsApi.getSelectedPaidModel(),
+  const paidLow = useQuery({
+    queryKey: ["model", "paid", "low"],
+    queryFn: () => modelsApi.getSelectedPaidModelForTier("low"),
   });
+
+  const paidModerate = useQuery({
+    queryKey: ["model", "paid", "moderate"],
+    queryFn: () => modelsApi.getSelectedPaidModelForTier("moderate"),
+  });
+
+  const paidPremium = useQuery({
+    queryKey: ["model", "paid", "premium"],
+    queryFn: () => modelsApi.getSelectedPaidModelForTier("premium"),
+  });
+
+  const paidTierCards: { tier: PaidTier; query: typeof paidLow }[] = [
+    { tier: "low", query: paidLow },
+    { tier: "moderate", query: paidModerate },
+    { tier: "premium", query: paidPremium },
+  ];
 
   const { data: imageModel, isLoading: imageModelLoading } = useQuery({
     queryKey: ["model", "image"],
@@ -143,35 +160,46 @@ export default function DashboardPage() {
               </Card>
             )}
 
-            {/* Paid Model */}
-            {paidModelLoading ? (
-              <SkeletonCard />
-            ) : (
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="flex items-start gap-4">
-                    <div className="p-3 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
-                      <Brain className="h-6 w-6 text-purple-600 dark:text-purple-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-medium text-gray-900 dark:text-gray-100">
-                          Paid Model
-                        </h3>
-                        <Badge variant="primary">Active</Badge>
+            {/* Paid Models, one card per tier */}
+            {paidTierCards.map(({ tier, query }) =>
+              query.isLoading ? (
+                <SkeletonCard key={tier} />
+              ) : (
+                <Card key={tier}>
+                  <CardContent className="pt-6">
+                    <div className="flex items-start gap-4">
+                      <div className="p-3 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
+                        <Brain className="h-6 w-6 text-purple-600 dark:text-purple-400" />
                       </div>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 truncate font-mono">
-                        {paidModel?.model_id || "Not configured"}
-                      </p>
-                      {paidModel?.context_length && (
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                          {formatNumber(paidModel.context_length)} context
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="font-medium text-gray-900 dark:text-gray-100">
+                            {PAID_TIER_LABELS[tier]} Paid
+                          </h3>
+                          <Badge variant="primary">paid:{tier}</Badge>
+                        </div>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 truncate font-mono">
+                          {query.data?.model_id || "Not configured"}
                         </p>
-                      )}
+                        {query.data?.pricing && (
+                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                            {formatCurrency(
+                              parseFloat(query.data.pricing.prompt) * 1000000,
+                              2
+                            )}
+                            /M in &middot;{" "}
+                            {formatCurrency(
+                              parseFloat(query.data.pricing.completion) * 1000000,
+                              2
+                            )}
+                            /M out
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )
             )}
 
             {/* Image Model */}

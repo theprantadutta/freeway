@@ -6,7 +6,16 @@ public class UsageLog : BaseEntity
 {
     public Guid ProjectId { get; set; }
     public string ModelId { get; set; } = string.Empty;
-    public string ModelType { get; set; } = string.Empty; // "free" or "paid"
+    public string ModelType { get; set; } = string.Empty; // "free", "paid", "image", "specific"
+
+    /// <summary>
+    /// Paid tier the request was served from: "low", "moderate" or "premium".
+    /// Null for free/image requests and for rows written before tiers existed.
+    /// <see cref="ModelType"/> deliberately keeps its original values so existing
+    /// analytics grouping and historical rows stay comparable.
+    /// </summary>
+    public string? ModelTier { get; set; }
+
     public int InputTokens { get; set; }
     public int OutputTokens { get; set; }
     public int ResponseTimeMs { get; set; }

@@ -1,3 +1,4 @@
+using Freeway.Domain.Common;
 using Freeway.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -12,15 +13,36 @@ public class ModelCacheService : IModelCacheService
     private List<CachedModel> _freeModels = new();
     private List<CachedModel> _paidModels = new();
     private List<CachedModel> _imageModels = new();
+    private Dictionary<PaidTier, List<CachedModel>> _paidModelsByTier = EmptyTierMap();
     private CachedModel? _selectedFreeModel;
-    private CachedModel? _selectedPaidModel;
+    private Dictionary<PaidTier, CachedModel?> _selectedPaidByTier = new();
     private CachedModel? _selectedImageModel;
     private DateTime? _lastUpdated;
+
+    // Model id -> tier, for models explicitly named in a tier's curated list. Curation wins
+    // over the price band so a curated model never drifts between tiers on a price change.
+    private static readonly Dictionary<string, PaidTier> CuratedTiers = BuildCuratedTiers();
 
     public ModelCacheService(IOpenRouterService openRouterService, ILogger<ModelCacheService> logger)
     {
         _openRouterService = openRouterService;
         _logger = logger;
+    }
+
+    private static Dictionary<PaidTier, List<CachedModel>> EmptyTierMap() =>
+        PaidTierExtensions.All.ToDictionary(t => t, _ => new List<CachedModel>());
+
+    private static Dictionary<string, PaidTier> BuildCuratedTiers()
+    {
+        var map = new Dictionary<string, PaidTier>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tier in PaidTierExtensions.All)
+        {
+            foreach (var id in PaidTierCatalog.CuratedFor(tier))
+            {
+                map.TryAdd(id, tier);
+            }
+        }
+        return map;
     }
 
     public List<CachedModel> GetFreeModels()
@@ -39,6 +61,16 @@ public class ModelCacheService : IModelCacheService
         }
     }
 
+    public List<CachedModel> GetPaidModels(PaidTier tier)
+    {
+        lock (_lock)
+        {
+            return _paidModelsByTier.TryGetValue(tier, out var models)
+                ? models.ToList()
+                : new List<CachedModel>();
+        }
+    }
+
     public CachedModel? GetSelectedFreeModel()
     {
         lock (_lock)
@@ -47,11 +79,13 @@ public class ModelCacheService : IModelCacheService
         }
     }
 
-    public CachedModel? GetSelectedPaidModel()
+    public CachedModel? GetSelectedPaidModel() => GetSelectedPaidModel(PaidTier.Low);
+
+    public CachedModel? GetSelectedPaidModel(PaidTier tier)
     {
         lock (_lock)
         {
-            return _selectedPaidModel;
+            return _selectedPaidByTier.TryGetValue(tier, out var model) ? model : null;
         }
     }
 
@@ -94,16 +128,28 @@ public class ModelCacheService : IModelCacheService
         }
     }
 
-    public void SetSelectedPaidModel(string modelId)
+    public void SetSelectedPaidModel(string modelId) => SetSelectedPaidModel(modelId, PaidTier.Low);
+
+    public bool SetSelectedPaidModel(string modelId, PaidTier tier)
     {
         lock (_lock)
         {
-            var model = _paidModels.FirstOrDefault(m => m.Id == modelId);
-            if (model != null)
+            // Only models belonging to the tier may be selected for it, otherwise a
+            // "premium" selection could silently point at a cheap model.
+            var model = _paidModelsByTier.TryGetValue(tier, out var models)
+                ? models.FirstOrDefault(m => m.Id == modelId)
+                : null;
+
+            if (model == null)
             {
-                _selectedPaidModel = model;
-                _logger.LogInformation("Selected paid model set to: {ModelId}", modelId);
+                _logger.LogWarning("Model {ModelId} is not in the {Tier} tier; selection rejected",
+                    modelId, tier.ToSlug());
+                return false;
             }
+
+            _selectedPaidByTier[tier] = model;
+            _logger.LogInformation("Selected {Tier} paid model set to: {ModelId}", tier.ToSlug(), modelId);
+            return true;
         }
     }
 
@@ -165,6 +211,12 @@ public class ModelCacheService : IModelCacheService
                 }
                 else if (IsValidPaidModel(model))
                 {
+                    // Curation wins over the price band, so a curated model never drifts
+                    // between tiers just because upstream changed its price.
+                    cachedModel.IsCurated = CuratedTiers.TryGetValue(cachedModel.Id, out var curatedTier);
+                    cachedModel.Tier = cachedModel.IsCurated
+                        ? curatedTier
+                        : PaidTierCatalog.Classify(GetTotalPrice(cachedModel));
                     paidModels.Add(cachedModel);
                 }
             }
@@ -180,6 +232,8 @@ public class ModelCacheService : IModelCacheService
                 .OrderBy(m => GetTotalPrice(m))
                 .Select((m, i) => { m.Rank = i + 1; return m; })
                 .ToList();
+
+            var paidByTier = BuildTierChains(paidModels);
 
             // Fetch image models
             var imageModelsRaw = await _openRouterService.GetImageModelsAsync(cancellationToken);
@@ -203,6 +257,7 @@ public class ModelCacheService : IModelCacheService
             {
                 _freeModels = freeModels;
                 _paidModels = paidModels;
+                _paidModelsByTier = paidByTier;
                 _imageModels = imageModels;
                 _lastUpdated = DateTime.UtcNow;
 
@@ -217,14 +272,34 @@ public class ModelCacheService : IModelCacheService
                     }
                 }
 
-                // Auto-select cheapest paid model (only on first load)
-                if (_selectedPaidModel == null)
+                // Auto-select the head of each tier's chain. An explicit admin selection is kept
+                // as long as that model is still offered in the tier.
+                foreach (var tier in PaidTierExtensions.All)
                 {
-                    _selectedPaidModel = paidModels.FirstOrDefault();
-                    if (_selectedPaidModel != null)
+                    var chain = paidByTier[tier];
+                    var current = _selectedPaidByTier.TryGetValue(tier, out var existing) ? existing : null;
+
+                    if (current != null && chain.Any(m => m.Id == current.Id))
+                        continue;
+
+                    if (current != null)
                     {
-                        _logger.LogInformation("Auto-selected cheapest paid model: {ModelId} (price: {Price})",
-                            _selectedPaidModel.Id, GetTotalPrice(_selectedPaidModel));
+                        _logger.LogInformation(
+                            "Previously selected {Tier} model {ModelId} is no longer offered; re-selecting",
+                            tier.ToSlug(), current.Id);
+                    }
+
+                    _selectedPaidByTier[tier] = chain.FirstOrDefault();
+
+                    if (_selectedPaidByTier[tier] is { } selected)
+                    {
+                        _logger.LogInformation(
+                            "Auto-selected {Tier} paid model: {ModelId} ({Price} USD/Mtok, curated: {Curated})",
+                            tier.ToSlug(), selected.Id, GetTotalPrice(selected) * 1_000_000m, selected.IsCurated);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("No models available for the {Tier} paid tier", tier.ToSlug());
                     }
                 }
 
@@ -240,13 +315,73 @@ public class ModelCacheService : IModelCacheService
                 }
             }
 
-            _logger.LogInformation("Model cache refreshed: {FreeCount} free, {PaidCount} paid, {ImageCount} image models",
-                freeModels.Count, paidModels.Count, imageModels.Count);
+            _logger.LogInformation(
+                "Model cache refreshed: {FreeCount} free, {PaidCount} paid ({Low} low / {Moderate} moderate / {Premium} premium), {ImageCount} image models",
+                freeModels.Count, paidModels.Count,
+                paidByTier[PaidTier.Low].Count, paidByTier[PaidTier.Moderate].Count,
+                paidByTier[PaidTier.Premium].Count, imageModels.Count);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to refresh models");
         }
+    }
+
+    /// <summary>
+    /// Orders each tier into the chain the chat fallback walks: curated models first in catalog
+    /// order (skipping any the upstream no longer offers), then the remainder of the tier
+    /// cheapest first. Entries are clones so each tier can carry its own rank.
+    /// </summary>
+    private Dictionary<PaidTier, List<CachedModel>> BuildTierChains(List<CachedModel> paidModels)
+    {
+        var result = EmptyTierMap();
+
+        foreach (var tier in PaidTierExtensions.All)
+        {
+            // paidModels is already sorted cheapest-first, so this preserves price order.
+            var members = paidModels.Where(m => m.Tier == tier).ToList();
+            var byId = new Dictionary<string, CachedModel>(StringComparer.OrdinalIgnoreCase);
+            foreach (var member in members)
+            {
+                byId.TryAdd(member.Id, member);
+            }
+
+            var chain = new List<CachedModel>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var curatedId in PaidTierCatalog.CuratedFor(tier))
+            {
+                if (byId.TryGetValue(curatedId, out var model) && seen.Add(model.Id))
+                    chain.Add(model);
+            }
+
+            var curatedFound = chain.Count;
+
+            foreach (var model in members)
+            {
+                if (seen.Add(model.Id))
+                    chain.Add(model);
+            }
+
+            result[tier] = chain
+                .Select((m, i) =>
+                {
+                    var clone = m.Clone();
+                    clone.Rank = i + 1;
+                    return clone;
+                })
+                .ToList();
+
+            var curatedTotal = PaidTierCatalog.CuratedFor(tier).Count;
+            if (curatedTotal > 0 && curatedFound < curatedTotal)
+            {
+                _logger.LogWarning(
+                    "{Tier} tier: only {Found}/{Total} curated models are currently offered; the chain falls back to the price band after them",
+                    tier.ToSlug(), curatedFound, curatedTotal);
+            }
+        }
+
+        return result;
     }
 
     private static bool IsFreeModel(OpenRouterModel model)
@@ -263,6 +398,11 @@ public class ModelCacheService : IModelCacheService
         // Exclude variable pricing models
         if (model.Id.Contains("/auto", StringComparison.OrdinalIgnoreCase) ||
             model.Id.Contains("router", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Exclude ":batch" variants. They are priced for asynchronous batch submission and are
+        // not valid targets for the synchronous chat endpoint this gateway exposes.
+        if (model.Id.EndsWith(":batch", StringComparison.OrdinalIgnoreCase))
             return false;
 
         // Require minimum context length

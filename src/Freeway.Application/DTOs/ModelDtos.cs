@@ -14,6 +14,12 @@ public class ModelInfoDto
     public int? ContextLength { get; set; }
     public PricingInfoDto Pricing { get; set; } = new();
     public int? Rank { get; set; }
+
+    /// <summary>Paid tier slug ("low"/"moderate"/"premium"). Null for free and image models.</summary>
+    public string? Tier { get; set; }
+
+    /// <summary>True when the model is explicitly listed in its tier's curated catalog.</summary>
+    public bool IsCurated { get; set; }
 }
 
 public class SelectedModelDto
@@ -23,6 +29,11 @@ public class SelectedModelDto
     public string? Description { get; set; }
     public int? ContextLength { get; set; }
     public PricingInfoDto Pricing { get; set; } = new();
+
+    /// <summary>Paid tier slug ("low"/"moderate"/"premium"). Null for free and image models.</summary>
+    public string? Tier { get; set; }
+
+    public bool IsCurated { get; set; }
 }
 
 public class ModelsListDto
@@ -30,6 +41,9 @@ public class ModelsListDto
     public List<ModelInfoDto> Models { get; set; } = new();
     public int TotalCount { get; set; }
     public DateTime? LastUpdated { get; set; }
+
+    /// <summary>Tier this listing was filtered to, or null when it covers all paid models.</summary>
+    public string? Tier { get; set; }
 }
 
 public class SetModelRequest
@@ -43,6 +57,9 @@ public class SetModelResponseDto
     public string ModelId { get; set; } = string.Empty;
     public string ModelName { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
+
+    /// <summary>Paid tier the selection was applied to. Null for free/image selections.</summary>
+    public string? Tier { get; set; }
 }
 
 // Provider model DTOs for /v1/models endpoint

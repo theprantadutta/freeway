@@ -1,5 +1,6 @@
 using Freeway.Application.Common;
 using Freeway.Application.DTOs;
+using Freeway.Domain.Common;
 using Freeway.Domain.Interfaces;
 using MediatR;
 
@@ -16,7 +17,9 @@ public class GetPaidModelsQueryHandler : IRequestHandler<GetPaidModelsQuery, Res
 
     public Task<Result<ModelsListDto>> Handle(GetPaidModelsQuery request, CancellationToken cancellationToken)
     {
-        var models = _modelCacheService.GetPaidModels();
+        var models = request.Tier is { } tier
+            ? _modelCacheService.GetPaidModels(tier)
+            : _modelCacheService.GetPaidModels();
 
         var result = new ModelsListDto
         {
@@ -31,10 +34,13 @@ public class GetPaidModelsQueryHandler : IRequestHandler<GetPaidModelsQuery, Res
                     Prompt = m.PromptPrice,
                     Completion = m.CompletionPrice
                 },
-                Rank = m.Rank
+                Rank = m.Rank,
+                Tier = m.Tier?.ToSlug(),
+                IsCurated = m.IsCurated
             }).ToList(),
             TotalCount = models.Count,
-            LastUpdated = _modelCacheService.GetLastUpdated()
+            LastUpdated = _modelCacheService.GetLastUpdated(),
+            Tier = request.Tier?.ToSlug()
         };
 
         return Task.FromResult(Result<ModelsListDto>.Success(result));

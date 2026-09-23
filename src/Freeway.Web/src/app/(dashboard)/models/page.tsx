@@ -2,25 +2,38 @@
 
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Brain, Check, Sparkles, Image } from "lucide-react";
+import { Search, Brain, Check, Sparkles, Image, Star } from "lucide-react";
 import { Header } from "@/components/layout/header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SkeletonList } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { modelsApi } from "@/lib/api/models";
 import { formatNumber, formatCurrency } from "@/lib/utils/format";
-import type { ModelInfo } from "@/lib/types";
+import { cn } from "@/lib/utils/cn";
+import {
+  PAID_TIERS,
+  PAID_TIER_LABELS,
+  type ModelInfo,
+  type PaidTier,
+} from "@/lib/types";
+
+const TIER_HINTS: Record<PaidTier, string> = {
+  low: "Cheapest available models. This is what a plain `paid` request uses.",
+  moderate: "Balanced cost and capability. Curated mid-range models first.",
+  premium: "Highest capability. Curated frontier models first — the most expensive tier.",
+};
 
 export default function ModelsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("free");
+  const [paidTier, setPaidTier] = useState<PaidTier>("low");
 
   // Queries
   const { data: freeModels, isLoading: loadingFree } = useQuery({
@@ -29,8 +42,8 @@ export default function ModelsPage() {
   });
 
   const { data: paidModels, isLoading: loadingPaid } = useQuery({
-    queryKey: ["models", "paid"],
-    queryFn: () => modelsApi.getPaidModels(),
+    queryKey: ["models", "paid", paidTier],
+    queryFn: () => modelsApi.getPaidModelsForTier(paidTier),
   });
 
   const { data: imageModels, isLoading: loadingImage } = useQuery({
@@ -44,8 +57,8 @@ export default function ModelsPage() {
   });
 
   const { data: selectedPaid } = useQuery({
-    queryKey: ["model", "paid"],
-    queryFn: () => modelsApi.getSelectedPaidModel(),
+    queryKey: ["model", "paid", paidTier],
+    queryFn: () => modelsApi.getSelectedPaidModelForTier(paidTier),
   });
 
   const { data: selectedImage } = useQuery({
@@ -66,13 +79,17 @@ export default function ModelsPage() {
   });
 
   const setPaidMutation = useMutation({
-    mutationFn: (modelId: string) => modelsApi.setSelectedPaidModel(modelId),
+    mutationFn: (modelId: string) =>
+      modelsApi.setSelectedPaidModelForTier(paidTier, modelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["model", "paid"] });
-      toast("Paid model updated successfully", "success");
+      toast(
+        `${PAID_TIER_LABELS[paidTier]} paid model updated successfully`,
+        "success"
+      );
     },
     onError: () => {
-      toast("Failed to update paid model", "error");
+      toast(`Failed to update ${PAID_TIER_LABELS[paidTier]} paid model`, "error");
     },
   });
 
@@ -185,6 +202,41 @@ export default function ModelsPage() {
           </Tabs>
         </div>
 
+        {/* Paid tier selector */}
+        {activeTab === "paid" && (
+          <div className="space-y-2">
+            <div
+              role="tablist"
+              aria-label="Paid tier"
+              className="inline-flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg"
+            >
+              {PAID_TIERS.map((tier) => (
+                <button
+                  key={tier}
+                  role="tab"
+                  aria-selected={paidTier === tier}
+                  onClick={() => setPaidTier(tier)}
+                  className={cn(
+                    "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
+                    paidTier === tier
+                      ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm"
+                      : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
+                  )}
+                >
+                  {PAID_TIER_LABELS[tier]}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {TIER_HINTS[paidTier]} Request it with{" "}
+              <code className="font-mono text-gray-700 dark:text-gray-300">
+                &quot;model&quot;: &quot;paid:{paidTier}&quot;
+              </code>
+              .
+            </p>
+          </div>
+        )}
+
         {/* Models List */}
         {isLoading ? (
           <SkeletonList count={5} />
@@ -271,6 +323,12 @@ function ModelCard({
                 <Badge variant="success">
                   <Check className="h-3 w-3 mr-1" />
                   Active
+                </Badge>
+              )}
+              {model.is_curated && (
+                <Badge variant="info" title="Preferred model for this tier">
+                  <Star className="h-3 w-3 mr-1" />
+                  Curated
                 </Badge>
               )}
             </div>

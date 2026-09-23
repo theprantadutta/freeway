@@ -82,8 +82,8 @@
 │  │     → Use ProviderOrchestrator.ExecuteWithFallbackAsync()          │   │
 │  │     → Smart multi-provider routing with benchmarks                 │   │
 │  │                                                                    │   │
-│  │  IF model == "paid" or specific model ID:                          │   │
-│  │     → ResolveModel() to find model in caches                       │   │
+│  │  IF model == "paid[:tier]" / "image" / specific model ID:          │   │
+│  │     → ResolveModel() to find model + tier in caches                │   │
 │  │     → Call OpenRouterService directly                              │   │
 │  └────────────────────────────────────────────────────────────────────┘   │
 │                                                                            │
@@ -98,7 +98,7 @@
                     │
          ┌─────────┴──────────┐
          │                    │
-    model="free"         model="paid"/specific
+    model="free"      model="paid[:tier]"/specific
          │                    │
          ▼                    ▼
 ┌────────────────────┐ ┌────────────────────────────────────────────────────┐
@@ -108,11 +108,13 @@
 │ ProviderOrchestra- │ │                                                     │
 │ tor.cs:30-110      │ │ Priority order:                                    │
 │                    │ │ 1. "free" → GetSelectedFreeModel()                 │
-│ 1. Get ranked      │ │ 2. "paid" → GetSelectedPaidModel()                 │
-│    providers from  │ │ 3. Check ModelCacheService (OpenRouter models)     │
-│    benchmark cache │ │ 4. Check ProviderModelCache (all providers)        │
-│                    │ │ 5. OpenRouter format check (contains "/")          │
-│ 2. Filter to FREE  │ │ 6. Return error if not found                       │
+│ 1. Get ranked      │ │ 2. "paid[:tier]" → GetSelectedPaidModel(tier)      │
+│    providers from  │ │    (bare "paid" == "paid:low"; bad tier → 400)     │
+│    benchmark cache │ │ 3. "image" → GetSelectedImageModel()               │
+│                    │ │ 4. Check ModelCacheService (OpenRouter models)     │
+│ 2. Filter to FREE  │ │ 5. Check ProviderModelCache (all providers)        │
+│    providers only  │ │ 6. OpenRouter format check (contains "/")          │
+│                    │ │ 7. Return error if not found                       │
 │    providers only  │ │                                                     │
 │                    │ │ Then → OpenRouterService.CreateChatCompletionAsync │
 │ 3. Try each in     │ └────────────────────────────────────────────────────┘
@@ -287,27 +289,52 @@ model="free" request:
 ```
 
 ```
-model="paid" / "image" request (CreateChatCompletionCommandHandler):
+model="paid[:tier]" / "image" request (CreateChatCompletionCommandHandler):
 
   ┌───────────────────────────────────────────────────────────┐
   │ BuildPaidCandidates(): ordered candidate list             │
-  │   = [selected model] + next PAID_FALLBACK_COUNT cheapest   │
+  │   = [selected model for tier]                             │
+  │     + next PAID_FALLBACK_COUNT from that tier's chain     │
   │   (models on cooldown moved to the back as last resort)   │
   │                                                           │
   │ ExecuteWithModelFallbackAsync(): try each in order        │
   │   Try #1: selected paid/image model                       │
   │     └─► 429 → mark in ModelCooldownCache → try next       │
   │     └─► other error → try next                            │
-  │   Try #2..N: next cheapest backup models                  │
+  │   Try #2..N: next models in the tier chain                │
   │     └─► SUCCESS → return (usage logged vs the model used) │
   │                                                           │
   │ ALL CANDIDATES FAILED → 502 Bad Gateway                   │
   └───────────────────────────────────────────────────────────┘
 
   A specific model ID (e.g. "anthropic/claude-...") is a single
-  attempt with no substitution — only the "paid"/"image" virtual
-  models fan out to backups.
+  attempt with no substitution — only the "paid[:tier]"/"image"
+  virtual models fan out to backups.
 ```
+
+### Paid tier chains (ModelCacheService.BuildTierChains)
+
+Each tier is ordered curated-first, then price-band cheapest-first:
+
+```
+  paid:low       no curation → cheapest-first over models < $1/Mtok
+                 (identical to what bare "paid" always did)
+
+  paid:moderate  openai/gpt-5-mini → gpt-4.1-mini → gpt-5.4-mini
+                 → o4-mini → rest of the $1–$10/Mtok band
+
+  paid:premium   openai/gpt-5.6-sol → sol-pro → gpt-5.6-terra
+                 → gpt-5.2 → claude-opus-4.1 → rest of >$10/Mtok
+```
+
+Curation wins over the price band, so a curated model stays in its tier
+even if upstream changes its price. `:batch` variants are excluded from
+every tier — they are priced for async batch submission and are not valid
+on a synchronous chat endpoint.
+
+The tier is recorded on each `UsageLog` as `model_tier` (nullable);
+`model_type` keeps its original `free`/`paid`/`image` values so existing
+analytics grouping and pre-tier rows stay comparable.
 
 Every OpenRouter request also carries provider-routing preferences
 (`OpenRouterService.BuildProviderPreferences`): `sort` (default

@@ -47,11 +47,12 @@ public class GetProjectUsageQueryHandler : IRequestHandler<GetProjectUsageQuery,
         };
 
         var byModel = logs
-            .GroupBy(l => new { l.ModelId, l.ModelType })
+            .GroupBy(l => new { l.ModelId, l.ModelType, l.ModelTier })
             .Select(g => new ModelUsageStatsDto
             {
                 ModelId = g.Key.ModelId,
                 ModelType = g.Key.ModelType,
+                ModelTier = g.Key.ModelTier,
                 Requests = g.Count(),
                 Tokens = g.Sum(l => l.InputTokens + l.OutputTokens),
                 CostUsd = g.Sum(l => l.CostUsd)
