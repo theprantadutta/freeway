@@ -40,7 +40,6 @@ export default function OverviewPage() {
 
   const o = q.data;
   const t = o?.totals;
-  const costDelta = t ? change(Number(t.cost_this_month), Number(t.cost_previous_month)) : null;
   const reqDelta = t ? change(t.requests_this_month, t.requests_previous_month) : null;
 
   return (
@@ -86,14 +85,24 @@ export default function OverviewPage() {
                     {money(Number(t?.cost_this_month ?? 0))}
                   </p>
                 )}
-                <Delta value={costDelta} suffix="vs last month" />
+                <Delta
+                  current={Number(t?.cost_this_month ?? 0)}
+                  previous={Number(t?.cost_previous_month ?? 0)}
+                  suffix="vs last month"
+                />
               </div>
 
               <dl className="mt-6 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-hair pt-4">
                 <Figure label="Requests" value={compact(t?.requests_this_month)} loading={q.isLoading} />
                 <Figure
-                  label="Delta"
-                  value={reqDelta == null ? "—" : `${reqDelta > 0 ? "+" : ""}${reqDelta.toFixed(0)}%`}
+                  label="Requests Δ"
+                  value={
+                    reqDelta == null
+                      ? "—"
+                      : Math.abs(reqDelta) >= 1000
+                        ? `×${compact((t?.requests_this_month ?? 0) / (t?.requests_previous_month || 1))}`
+                        : `${reqDelta > 0 ? "+" : ""}${reqDelta.toFixed(0)}%`
+                  }
                   loading={q.isLoading}
                 />
                 <Figure label="Tokens" value={compact(t?.tokens_this_month)} loading={q.isLoading} />
@@ -369,15 +378,34 @@ function Figure({
   );
 }
 
-function Delta({ value, suffix }: { value: number | null; suffix: string }) {
-  if (value == null) {
-    return <p className="mt-2 text-xs text-text-3">no prior month to compare</p>;
+function Delta({
+  current,
+  previous,
+  suffix,
+}: {
+  current: number;
+  previous: number;
+  suffix: string;
+}) {
+  if (!previous) {
+    return <p className="mt-2 text-xs text-text-3">nothing last month to compare against</p>;
   }
-  const up = value > 0;
+
+  const percent = ((current - previous) / previous) * 100;
+  const up = percent > 0;
+
+  // Growing from almost nothing produces percentages like 388,914%, which is
+  // arithmetically right and tells you nothing. Past an order of magnitude a
+  // multiplier is the readable form.
+  const label =
+    Math.abs(percent) >= 1000
+      ? `×${compact(current / previous)}`
+      : `${Math.abs(percent).toFixed(0)}%`;
+
   return (
     <p className="mt-2 text-xs">
       <span className={cn("fig font-medium", up ? "text-bad" : "text-ok")}>
-        {up ? "▲" : "▼"} {Math.abs(value).toFixed(0)}%
+        {up ? "▲" : "▼"} {label}
       </span>
       <span className="ml-1.5 text-text-3">{suffix}</span>
     </p>
