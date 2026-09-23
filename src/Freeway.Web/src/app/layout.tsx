@@ -45,10 +45,12 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Settle the theme before first paint so there is no flash of the wrong one. */}
+        {/* Settle the theme before first paint so there is no flash of the wrong
+            one. The console is dark by default and `.light` opts out, so that is
+            the class this sets. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var s=localStorage.getItem('freeway-theme');var t=s?JSON.parse(s).state.theme:'dark';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d)}catch(e){document.documentElement.classList.add('dark')}})()`,
+            __html: `(function(){try{var s=localStorage.getItem('freeway-theme');var t=s?JSON.parse(s).state.theme:'system';var d=t==='dark'||(t!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('light',!d)}catch(e){}})()`,
           }}
         />
       </head>

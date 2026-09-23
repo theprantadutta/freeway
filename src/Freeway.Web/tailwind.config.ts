@@ -18,6 +18,10 @@ export default {
     extend: {
       colors: {
         base: "rgb(var(--base) / <alpha-value>)",
+        // Same value as `base`, under a name that cannot collide. `text-base` is
+        // Tailwind's font-size utility, so it silently produces no colour at all;
+        // use `text-inverse` for text sitting on a solid light fill.
+        inverse: "rgb(var(--base) / <alpha-value>)",
         panel: "rgb(var(--panel) / <alpha-value>)",
         raised: "rgb(var(--raised) / <alpha-value>)",
         sunken: "rgb(var(--sunken) / <alpha-value>)",
