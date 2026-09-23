@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
 import { ChevronDown, LogOut, Monitor, Moon, Sun } from "lucide-react";
 import { Mark } from "@/components/brand/mark";
+import { Menu, MenuItem } from "@/components/ui/menu";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { useThemeStore } from "@/lib/stores/theme-store";
 import { cn } from "@/lib/utils/cn";
@@ -113,59 +113,46 @@ function ThemeToggle() {
 function AccountMenu() {
   const user = useAuthStore((s) => s.user);
   const clearAuth = useAuthStore((s) => s.clearAuth);
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
 
   const initial = (user?.name || user?.email || "?").charAt(0).toUpperCase();
 
   return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        className="flex items-center gap-1.5 rounded py-1 pl-1 pr-1.5 transition-colors hover:bg-raised"
-      >
-        <span className="grid h-6 w-6 place-items-center rounded bg-accent/15 text-2xs font-semibold text-accent">
-          {initial}
-        </span>
-        <ChevronDown className="h-3.5 w-3.5 text-text-3" aria-hidden />
-      </button>
-
-      {open && (
+    <Menu
+      trigger={(props) => (
+        <button
+          {...props}
+          aria-label="Account"
+          className="flex items-center gap-1.5 rounded py-1 pl-1 pr-1.5 transition-colors hover:bg-raised"
+        >
+          <span className="grid h-6 w-6 place-items-center rounded bg-accent/15 text-2xs font-semibold text-accent">
+            {initial}
+          </span>
+          <ChevronDown className="h-3.5 w-3.5 text-text-3" aria-hidden />
+        </button>
+      )}
+      className="w-56"
+    >
+      {(close) => (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden />
-          <div
-            role="menu"
-            className="absolute right-0 top-full z-20 mt-1.5 w-56 overflow-hidden rounded border border-hair-bright bg-raised animate-pop"
-          >
-            <div className="border-b border-hair px-3 py-2.5">
-              <p className="truncate text-sm font-medium text-text">
-                {user?.name || user?.email?.split("@")[0]}
-              </p>
-              <p className="truncate text-xs text-text-3">{user?.email}</p>
-            </div>
-            <button
-              role="menuitem"
-              onClick={() => {
-                clearAuth();
-                window.location.href = "/login";
-              }}
-              className="flex w-full items-center gap-2.5 px-3 py-2.5 text-sm text-text-2 transition-colors hover:bg-panel hover:text-bad"
-            >
-              <LogOut className="h-3.5 w-3.5" aria-hidden />
-              Sign out
-            </button>
+          <div className="mb-1 border-b border-hair px-3 pb-2.5 pt-1.5">
+            <p className="truncate text-sm font-medium text-text">
+              {user?.name || user?.email?.split("@")[0]}
+            </p>
+            <p className="truncate text-xs text-text-3">{user?.email}</p>
           </div>
+          <MenuItem
+            icon={LogOut}
+            tone="danger"
+            onClick={() => {
+              close();
+              clearAuth();
+              window.location.href = "/login";
+            }}
+          >
+            Sign out
+          </MenuItem>
         </>
       )}
-    </div>
+    </Menu>
   );
 }

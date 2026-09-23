@@ -17,18 +17,20 @@ import {
 } from "lucide-react";
 import { PageHead } from "@/components/shell/page-head";
 import { Panel } from "@/components/ui/panel";
+import { Menu, MenuItem } from "@/components/ui/menu";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Tag } from "@/components/ui/tag";
 import { Sheet, SheetActions } from "@/components/ui/sheet";
-import { Pulse, PulseRows } from "@/components/ui/pulse";
+import { Pulse } from "@/components/ui/pulse";
 import { Empty, Failed } from "@/components/ui/state";
 import { useToast } from "@/components/ui/toast";
 import { projectsApi } from "@/lib/api/projects";
 import { analyticsApi } from "@/lib/api/analytics";
 import { cn } from "@/lib/utils/cn";
-import { compact, fullDate, money, startOfMonthIso } from "@/lib/utils/format";
-import type { Project } from "@/lib/types";
+import { compact, fullDate, money, pct, startOfMonthIso } from "@/lib/utils/format";
+import { LANES, laneOf, type Lane } from "@/lib/theme/lanes";
+import type { ModelUsageStats, Project } from "@/lib/types";
 
 export default function ProjectsPage() {
   const qc = useQueryClient();
@@ -104,35 +106,44 @@ export default function ProjectsPage() {
       {list.isError ? (
         <Failed title="Could not load projects" onRetry={() => list.refetch()} />
       ) : (
-        <Panel>
+        <>
           {list.isLoading ? (
-            <PulseRows rows={4} />
+            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <li
+                  key={i}
+                  className="h-[13.5rem] rounded-panel border border-hair bg-panel p-4"
+                >
+                  <Pulse className="h-4 w-1/2" />
+                  <Pulse className="mt-3 h-3 w-2/3" />
+                  <Pulse className="mt-6 h-8 w-28" />
+                  <Pulse className="mt-6 h-1.5 w-full rounded-full" />
+                </li>
+              ))}
+            </ul>
           ) : projects.length === 0 ? (
-            <Empty
-              className="lane-accent"
-              icon={FolderKanban}
-              title="No projects yet"
-              body="A project gets its own key, its own limit and its own line in every report. Create one to start sending requests."
-              action={
-                <Button variant="solid" onClick={() => setCreating(true)}>
-                  <Plus className="h-3.5 w-3.5" aria-hidden />
-                  New project
-                </Button>
-              }
-            />
+            <Panel>
+              <Empty
+                className="lane-accent"
+                icon={FolderKanban}
+                title="No projects yet"
+                body="A project gets its own key, its own limit and its own line in every report. Create one to start sending requests."
+                action={
+                  <Button variant="solid" onClick={() => setCreating(true)}>
+                    <Plus className="h-3.5 w-3.5" aria-hidden />
+                    New project
+                  </Button>
+                }
+              />
+            </Panel>
           ) : (
             <>
-              <div className="flex items-center justify-between border-b border-hair px-4 py-2.5">
-                <p className="text-2xs font-medium uppercase text-text-3">
-                  {activeCount} of {projects.length} accepting requests
-                </p>
-                <p className="hidden text-2xs font-medium uppercase text-text-3 sm:block">
-                  This month · all time
-                </p>
-              </div>
-              <ul className="divide-y divide-hair">
+              <p className="mb-3 text-2xs font-medium uppercase tracking-wide text-text-3">
+                {activeCount} of {projects.length} accepting requests
+              </p>
+              <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {projects.map((p) => (
-                  <ProjectRow
+                  <ProjectCard
                     key={p.id}
                     project={p}
                     onEdit={() => setEditing(p)}
@@ -143,7 +154,7 @@ export default function ProjectsPage() {
               </ul>
             </>
           )}
-        </Panel>
+        </>
       )}
 
       <CreateSheet
@@ -199,7 +210,15 @@ export default function ProjectsPage() {
   );
 }
 
-function ProjectRow({
+/**
+ * One project, as a card.
+ *
+ * The thing people come to this page to compare is spend, so the month's figure is
+ * the card's largest element and everything else is arranged around it. The rule
+ * along the top takes the colour of the lane the project sends most of its traffic
+ * to, which makes a wall of cards sortable by eye before a single number is read.
+ */
+function ProjectCard({
   project,
   onEdit,
   onRotate,
@@ -210,7 +229,7 @@ function ProjectRow({
   onRotate: () => void;
   onDelete: () => void;
 }) {
-  // Spend is what this list is scanned for, so each row fetches its own figures.
+  // Spend is what this page is scanned for, so each card fetches its own figures.
   const month = useQuery({
     queryKey: ["project-usage", project.id, "month"],
     queryFn: () => analyticsApi.getProjectUsage(project.id, startOfMonthIso()),
@@ -222,64 +241,144 @@ function ProjectRow({
 
   const loading = month.isLoading || life.isLoading;
 
+  // Split by requests rather than cost: a project living on the free lane spends
+  // nothing, and a bar of all zeros would say it had no traffic at all.
+  const split = laneSplit(life.data?.by_model ?? []);
+  const dominant = split[0]?.lane ?? LANES.other;
+
+  const monthCost = Number(month.data?.summary?.total_cost_usd ?? 0);
+  const monthReqs = month.data?.summary?.total_requests ?? 0;
+  const lifeCost = Number(life.data?.summary?.total_cost_usd ?? 0);
+  const success = life.data?.summary?.success_rate;
+
   return (
-    <li className="group relative flex items-center gap-4 px-4 py-3 transition-colors hover:bg-raised">
+    <li
+      className={cn(
+        dominant.scope,
+        "group relative flex flex-col overflow-hidden rounded-panel border border-hair bg-panel",
+        "transition-colors duration-150 hover:border-hair-bright focus-within:border-hair-bright"
+      )}
+    >
+      {/* The lane rule. Thin and flat until the card is hovered, then it owns the edge. */}
       <span
-        className={cn(
-          "h-6 w-0.5 shrink-0 rounded-full",
-          project.is_active ? "bg-ok" : "bg-text-3/40"
-        )}
+        className="h-0.5 w-full lane-bg opacity-60 transition-opacity duration-150 group-hover:opacity-100"
         aria-hidden
       />
 
-      <Link href={`/projects/${project.id}`} className="min-w-0 flex-1 rounded outline-none">
-        <span className="absolute inset-0" aria-hidden />
-        <span className="flex flex-wrap items-center gap-2">
-          <span className="truncate text-sm font-semibold text-text">{project.name}</span>
-          {!project.is_active && <Tag>paused</Tag>}
-        </span>
-        <span className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-text-3">
-          <code className="font-mono">{project.api_key_prefix}…</code>
-          <span className="fig">{project.rate_limit_per_minute}/min</span>
-          <span className="hidden sm:inline">since {fullDate(project.created_at)}</span>
-        </span>
-      </Link>
-
-      <div className="relative z-10 flex shrink-0 items-center gap-5">
-        <div className="text-right">
-          {loading ? (
-            <Pulse className="ml-auto h-4 w-16" />
-          ) : (
-            <p className="fig text-sm text-text">
-              {money(Number(month.data?.summary?.total_cost_usd ?? 0))}
-            </p>
-          )}
-          <p className="text-2xs text-text-3">
-            {loading ? "" : `${compact(month.data?.summary?.total_requests ?? 0)} req`}
-          </p>
-        </div>
-        <div className="hidden text-right sm:block">
-          {loading ? (
-            <Pulse className="ml-auto h-4 w-16" />
-          ) : (
-            <p className="fig text-sm text-text-2">
-              {money(Number(life.data?.summary?.total_cost_usd ?? 0))}
-            </p>
-          )}
-          <p className="text-2xs text-text-3">
-            {loading ? "" : `${compact(life.data?.summary?.total_requests ?? 0)} req`}
+      <div className="flex items-start gap-3 px-4 pt-3.5">
+        <div className="min-w-0 flex-1">
+          <Link href={`/projects/${project.id}`} className="rounded outline-none">
+            <span className="absolute inset-0" aria-hidden />
+            {/* Fixed height: the `paused` tag is taller than bare text, and without
+                this it nudges the whole card down out of line with its neighbours. */}
+            <span className="flex h-5 items-center gap-2">
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 shrink-0 rounded-full",
+                  project.is_active ? "bg-ok" : "bg-text-3/50"
+                )}
+                aria-hidden
+              />
+              <span className="truncate text-sm font-semibold text-text">{project.name}</span>
+              {!project.is_active && <Tag>paused</Tag>}
+            </span>
+          </Link>
+          <p className="mt-1.5 flex items-center gap-2 text-xs text-text-3">
+            <code className="font-mono">{project.api_key_prefix}…</code>
+            <span aria-hidden>·</span>
+            <span className="fig">{project.rate_limit_per_minute}/min</span>
           </p>
         </div>
 
-        <RowMenu name={project.name} onEdit={onEdit} onRotate={onRotate} onDelete={onDelete} />
+        <div className="relative z-10 shrink-0">
+          <RowMenu name={project.name} onEdit={onEdit} onRotate={onRotate} onDelete={onDelete} />
+        </div>
+      </div>
 
+      <div className="px-4 pt-4">
+        {loading ? (
+          <Pulse className="h-8 w-28" />
+        ) : (
+          <p className="fig text-2xl font-semibold leading-none tracking-tight text-text">
+            {money(monthCost)}
+          </p>
+        )}
+        <p className="mt-1.5 text-xs text-text-3">
+          {loading ? " " : `this month · ${compact(monthReqs)} requests`}
+        </p>
+      </div>
+
+      <div className="mt-4 px-4">
+        {loading ? (
+          <Pulse className="h-1.5 w-full rounded-full" />
+        ) : split.length === 0 ? (
+          <p className="text-xs text-text-3">No traffic yet</p>
+        ) : (
+          <>
+            {/* Identity comes from the keyed list below, never from hue alone: the
+                card's click overlay sits above this bar, so it can carry no hover. */}
+            <div className="flex h-1.5 w-full gap-px overflow-hidden rounded-full" aria-hidden>
+              {split.map((s) => (
+                <span
+                  key={s.lane.key}
+                  className={cn(s.lane.scope, "h-full lane-bg")}
+                  style={{ width: `${s.share}%` }}
+                />
+              ))}
+            </div>
+            <ul className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+              {split.map((s) => (
+                <li key={s.lane.key} className={cn(s.lane.scope, "flex items-center gap-1.5")}>
+                  <span className="h-1.5 w-1.5 rounded-full lane-bg" aria-hidden />
+                  <span className="text-2xs text-text-3">
+                    {s.lane.label} {Math.round(s.share)}%
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+
+      <div className="mt-4 flex items-center gap-4 border-t border-hair px-4 py-2.5 text-2xs text-text-3">
+        <span>
+          all time <span className="fig text-text-2">{loading ? "—" : money(lifeCost)}</span>
+        </span>
+        {!loading && success != null && (
+          <span>
+            <span className="fig text-text-2">{pct(success, 1)}</span> ok
+          </span>
+        )}
+        <span className="ml-auto hidden truncate sm:block">
+          since {fullDate(project.created_at)}
+        </span>
         <ChevronRight
-          className="hidden h-4 w-4 text-text-3 transition-transform duration-150 ease-out group-hover:translate-x-0.5 lg:block"
+          className="h-3.5 w-3.5 shrink-0 text-text-3 transition-transform duration-150 ease-out group-hover:translate-x-0.5"
           aria-hidden
         />
       </div>
     </li>
   );
+}
+
+/** Aggregates per-model rows onto lanes, largest share first. */
+function laneSplit(byModel: ModelUsageStats[]) {
+  const totals = new Map<string, { lane: Lane; requests: number }>();
+
+  for (const row of byModel) {
+    const lane = laneOf(row.model_type, row.model_tier);
+    const entry = totals.get(lane.key) ?? { lane, requests: 0 };
+    entry.requests += row.requests;
+    totals.set(lane.key, entry);
+  }
+
+  const all = [...totals.values()].filter((e) => e.requests > 0);
+  const total = all.reduce((sum, e) => sum + e.requests, 0);
+  if (total === 0) return [];
+
+  return all
+    .map((e) => ({ ...e, share: (e.requests / total) * 100 }))
+    .sort((a, b) => b.share - a.share);
 }
 
 function RowMenu({
@@ -293,62 +392,28 @@ function RowMenu({
   onRotate: () => void;
   onDelete: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
-
-  const items = [
-    { label: "Edit project", icon: Pencil, run: onEdit, tone: "" },
-    { label: "Rotate API key", icon: RefreshCw, run: onRotate, tone: "" },
-    { label: "Delete project", icon: Trash2, run: onDelete, tone: "text-bad" },
-  ];
-
   return (
-    <div className="relative" ref={ref}>
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label={`Actions for ${name}`}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <MoreVertical className="h-4 w-4" aria-hidden />
-      </Button>
-      {open && (
+    <Menu
+      trigger={(props) => (
+        <Button {...props} variant="ghost" size="icon" aria-label={`Actions for ${name}`}>
+          <MoreVertical className="h-4 w-4" aria-hidden />
+        </Button>
+      )}
+    >
+      {(close) => (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden />
-          <div
-            role="menu"
-            className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded border border-hair-bright bg-raised py-1 animate-pop"
-          >
-            {items.map((i) => (
-              <button
-                key={i.label}
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  i.run();
-                }}
-                className={cn(
-                  "flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors hover:bg-panel",
-                  i.tone || "text-text-2 hover:text-text"
-                )}
-              >
-                <i.icon className="h-3.5 w-3.5" aria-hidden />
-                {i.label}
-              </button>
-            ))}
-          </div>
+          <MenuItem icon={Pencil} onClick={() => { close(); onEdit(); }}>
+            Edit project
+          </MenuItem>
+          <MenuItem icon={RefreshCw} onClick={() => { close(); onRotate(); }}>
+            Rotate API key
+          </MenuItem>
+          <MenuItem icon={Trash2} tone="danger" onClick={() => { close(); onDelete(); }}>
+            Delete project
+          </MenuItem>
         </>
       )}
-    </div>
+    </Menu>
   );
 }
 
