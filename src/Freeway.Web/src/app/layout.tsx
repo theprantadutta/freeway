@@ -1,25 +1,40 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 
-const plexSans = IBM_Plex_Sans({
-  variable: "--font-plex-sans",
+// Space Grotesk carries the interface: it has real character at display sizes and
+// stays technical rather than friendly, which suits a console.
+const display = Space_Grotesk({
+  variable: "--font-display",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
-const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
+// Every number and identifier is set in mono. In an ops console figures are data to
+// be compared down a column, not prose.
+const mono = JetBrains_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Freeway",
-  description: "Control panel for the Freeway AI gateway",
+  title: { default: "Freeway", template: "%s · Freeway" },
+  description: "Telemetry and routing for the Freeway AI gateway",
+  applicationName: "Freeway",
+  // icon.svg, favicon.ico and apple-icon.png sit beside this file and are picked
+  // up by convention; this only adds the mask icon older Safari asks for.
+  icons: { other: [{ rel: "mask-icon", url: "/icon-192.png", color: "#10B981" }] },
+};
+
+export const viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#07090D" },
+    { media: "(prefers-color-scheme: light)", color: "#FAFAFC" },
+  ],
 };
 
 export default function RootLayout({
@@ -30,14 +45,14 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Paint the right background before hydration so there is no flash. */}
+        {/* Settle the theme before first paint so there is no flash of the wrong one. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var s=localStorage.getItem('freeway-theme');var t=s?JSON.parse(s).state.theme:'system';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d)}catch(e){}})()`,
+            __html: `(function(){try{var s=localStorage.getItem('freeway-theme');var t=s?JSON.parse(s).state.theme:'dark';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d)}catch(e){document.documentElement.classList.add('dark')}})()`,
           }}
         />
       </head>
-      <body className={`${plexSans.variable} ${plexMono.variable} antialiased`}>
+      <body className={`${display.variable} ${mono.variable} antialiased`}>
         <Providers>{children}</Providers>
       </body>
     </html>

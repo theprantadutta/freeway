@@ -1,7 +1,10 @@
 import { api } from "./client";
-import type { GlobalSummary, ProjectUsage, UsageLogsResponse } from "@/lib/types";
+import type { GlobalSummary, Overview, ProjectUsage, UsageLogsResponse } from "@/lib/types";
 
 export const analyticsApi = {
+  /** Everything the dashboard needs in one call, including the daily series. */
+  getOverview: (days = 30) => api.get<Overview>(`/admin/analytics/overview?days=${days}`),
+
   // Global summary
   getGlobalSummary: () => api.get<GlobalSummary>("/admin/analytics/summary"),
 

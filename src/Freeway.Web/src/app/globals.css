@@ -3,96 +3,77 @@
 @tailwind utilities;
 
 /*
-  Freeway control panel.
+  Freeway — telemetry console.
 
-  Colour rule: every model type owns a hue, and that hue follows it everywhere —
-  nav, tiles, badges, charts, rails, logs. The paid tiers run as a cost ladder
-  (green -> blue -> amber -> rose) because the spend difference between them is
-  ~300x, so the operator should see cost before reading a number. Image sits
-  apart in violet since it is a different kind of work, not a cost step.
+  Two rules hold the whole thing together.
 
-  Large areas use the hue at low alpha; saturated colour is kept for text,
-  icons, rails and chart marks so the tints never turn muddy.
+  Structure is achromatic and dark-first. The console is a black field with panels
+  lifted out of it by a hairline, never a white card floating on grey.
+
+  Hue means one thing only: which lane a request took. Free green, then the paid
+  tiers climb low blue → moderate amber → premium rose as a cost ladder, with image
+  set apart in violet because it is a different kind of work rather than a step on
+  that ladder. Nothing else in the interface is allowed to be coloured.
 */
 
 :root {
-  --surface: 247 248 251;
-  --panel: 255 255 255;
-  --inset: 242 244 248;
-  --line: 227 231 238;
-  --line-strong: 202 209 220;
+  /* Dark is the default: this is a screen people leave open. */
+  --base: 7 9 13;
+  --panel: 14 17 22;
+  --raised: 20 25 33;
+  --sunken: 10 13 18;
+  --hair: 30 36 46;
+  --hair-bright: 46 54 68;
 
-  --ink: 16 21 32;
-  --muted: 88 98 116;
-  --subtle: 130 140 158;
+  --text: 233 238 245;
+  --text-2: 150 160 176;
+  --text-3: 99 109 125;
 
-  --brand: 79 70 229;
-  --focus: 79 70 229;
-  --shadow: 15 23 42;
+  --accent: 99 102 241;
 
-  /* Model types */
-  --free: 5 150 105;
-  --low: 2 132 199;
-  --moderate: 217 119 6;
-  --premium: 225 29 72;
-  --image: 124 58 237;
-
-  /* Status */
-  --ok: 5 150 105;
-  --warn: 217 119 6;
-  --danger: 225 29 72;
-  --info: 2 132 199;
-
-  /*
-    Chart marks. These are deliberately NOT the text tokens above: marks are
-    large filled areas and want mid tones, text wants contrast against its
-    surface. This set is validated for both modes (OKLCH lightness band, chroma
-    floor, CVD separation and contrast), so it stays fixed light and dark.
-  */
-  --mark-free: 5 150 105;
-  --mark-low: 2 132 199;
-  --mark-moderate: 217 119 6;
-  --mark-premium: 225 29 72;
-  --mark-image: 124 58 237;
-  --mark-brand: 79 70 229;
-
-  color-scheme: light;
-}
-
-.dark {
-  --surface: 10 12 17;
-  --panel: 19 23 31;
-  --inset: 27 32 42;
-  --line: 37 43 54;
-  --line-strong: 55 63 77;
-
-  --ink: 233 237 243;
-  --muted: 158 168 184;
-  --subtle: 110 120 137;
-
-  --brand: 129 140 248;
-  --focus: 129 140 248;
-  --shadow: 0 0 0;
-
-  --free: 52 211 153;
+  --free: 16 185 129;
   --low: 56 189 248;
-  --moderate: 251 191 36;
-  --premium: 251 113 133;
+  --moderate: 251 176 64;
+  --premium: 244 87 116;
   --image: 167 139 250;
 
-  --ok: 52 211 153;
-  --warn: 251 191 36;
-  --danger: 251 113 133;
-  --info: 56 189 248;
-
-  /* Mark tokens are intentionally not redefined here - see the note above. */
+  --ok: 16 185 129;
+  --warn: 251 176 64;
+  --bad: 244 87 116;
 
   color-scheme: dark;
 }
 
+:root.light {
+  --base: 250 250 252;
+  --panel: 255 255 255;
+  --raised: 255 255 255;
+  --sunken: 244 245 248;
+  --hair: 226 229 236;
+  --hair-bright: 203 208 219;
+
+  --text: 12 15 22;
+  --text-2: 86 95 111;
+  --text-3: 132 141 157;
+
+  --accent: 79 70 229;
+
+  --free: 5 150 105;
+  --low: 2 132 199;
+  --moderate: 202 106 6;
+  --premium: 225 29 72;
+  --image: 124 58 237;
+
+  --ok: 5 150 105;
+  --warn: 202 106 6;
+  --bad: 225 29 72;
+
+  color-scheme: light;
+}
+
 @layer base {
   * {
-    border-color: rgb(var(--line));
+    border-color: rgb(var(--hair));
   }
 
   html {
@@ -100,152 +81,184 @@
   }
 
   body {
-    background-color: rgb(var(--surface));
-    color: rgb(var(--ink));
-    font-family: var(--font-plex-sans), system-ui, sans-serif;
-    font-feature-settings: "cv02", "cv03", "ss01";
-  }
-
-  /* Anything comparable down a column gets tabular figures. */
-  .tnum,
-  th,
-  td,
-  input[type="number"] {
-    font-variant-numeric: tabular-nums;
-    font-feature-settings: "tnum";
+    background: rgb(var(--base));
+    color: rgb(var(--text));
+    font-family: var(--font-display), system-ui, sans-serif;
+    font-synthesis-weight: none;
   }
 
   :focus-visible {
-    outline: 2px solid rgb(var(--focus));
+    outline: 2px solid rgb(var(--accent));
     outline-offset: 2px;
-    border-radius: 0.25rem;
+    border-radius: 2px;
   }
 
   ::selection {
-    background: rgb(var(--brand) / 0.22);
+    background: rgb(var(--accent) / 0.3);
   }
 }
 
 @layer components {
-  .metric {
+  /*
+    Figures. Mono with tabular numerals, because a number in this interface is data
+    to be compared down a column rather than prose to be read along a line.
+  */
+  .fig {
+    font-family: var(--font-mono), ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
-    font-feature-settings: "tnum";
-    letter-spacing: -0.02em;
+    font-feature-settings: "tnum", "zero";
+  }
+
+  /* The one display size. Used for the figure a page is actually about. */
+  .fig-hero {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum", "zero";
+    font-weight: 600;
+    letter-spacing: -0.045em;
+    line-height: 0.92;
   }
 
   /*
-    Accent scope. Set --accent on a container and its children pick the hue up
-    through these helpers, so a tier card, its icon, its rail and its chart mark
-    all stay in step without repeating the colour at every level.
+    Section markers. A hairline rule with the label sitting on it, so a section is
+    announced by structure rather than by yet another bold heading.
   */
-  .accent-free { --accent: var(--free); --mark: var(--mark-free); }
-  .accent-low { --accent: var(--low); --mark: var(--mark-low); }
-  .accent-moderate { --accent: var(--moderate); --mark: var(--mark-moderate); }
-  .accent-premium { --accent: var(--premium); --mark: var(--mark-premium); }
-  .accent-image { --accent: var(--image); --mark: var(--mark-image); }
-  .accent-brand { --accent: var(--brand); --mark: var(--mark-brand); }
-
-  /* Fill for a chart mark inside an accent scope. */
-  .mark-bg { background-color: rgb(var(--mark)); }
-
-  .accent-text { color: rgb(var(--accent)); }
-  .accent-bg { background-color: rgb(var(--accent)); }
-  .accent-tint { background-color: rgb(var(--accent) / 0.1); }
-  .accent-tint-strong { background-color: rgb(var(--accent) / 0.16); }
-  .accent-border { border-color: rgb(var(--accent) / 0.3); }
-  .accent-ring { box-shadow: 0 0 0 1px rgb(var(--accent) / 0.25); }
-
-  /* A tier's colour as a left edge rather than a filled block. */
-  .rail {
-    position: relative;
-    overflow: hidden;
+  .rule {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
   }
-  .rail::before {
+  .rule::after {
     content: "";
-    position: absolute;
-    inset-block: 0;
-    inset-inline-start: 0;
-    width: 3px;
-    background: rgb(var(--accent));
+    flex: 1;
+    height: 1px;
+    background: rgb(var(--hair));
   }
 
-  /* Wash used behind a panel header to carry the hue across a whole section. */
-  .accent-wash {
-    background-image: linear-gradient(
-      to bottom,
-      rgb(var(--accent) / 0.08),
-      rgb(var(--accent) / 0)
+  /* Lane scope. Set one of these and everything inside picks up the hue. */
+  .lane-free { --lane: var(--free); }
+  .lane-low { --lane: var(--low); }
+  .lane-moderate { --lane: var(--moderate); }
+  .lane-premium { --lane: var(--premium); }
+  .lane-image { --lane: var(--image); }
+  .lane-other { --lane: var(--text-3); }
+  .lane-accent { --lane: var(--accent); }
+
+  .lane-fg { color: rgb(var(--lane)); }
+  .lane-bg { background-color: rgb(var(--lane)); }
+  .lane-soft { background-color: rgb(var(--lane) / 0.12); }
+  .lane-edge { border-color: rgb(var(--lane) / 0.35); }
+
+  /* A lane's colour as a glow behind a figure, used once per card at most. */
+  .lane-halo {
+    background-image: radial-gradient(
+      120% 100% at 0% 0%,
+      rgb(var(--lane) / 0.14),
+      transparent 60%
+    );
+  }
+
+  /*
+    Panel. A hairline box lifted out of the field. No shadow: shadows imply paper,
+    and this is a screen showing live numbers.
+  */
+  .panel {
+    background: rgb(var(--panel));
+    border: 1px solid rgb(var(--hair));
+    border-radius: 0.75rem;
+  }
+
+  .panel-flush {
+    background: rgb(var(--panel));
+    border-top: 1px solid rgb(var(--hair));
+    border-bottom: 1px solid rgb(var(--hair));
+  }
+
+  /* Ticks along the top of the console, a nod to a signal readout. */
+  .ticks {
+    background-image: repeating-linear-gradient(
+      to right,
+      rgb(var(--hair-bright)) 0 1px,
+      transparent 1px 7px
     );
   }
 }
 
+/* Scrollbars, present but out of the way. */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
 }
-
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: rgb(var(--line-strong));
-  border-radius: 999px;
+  background: rgb(var(--hair-bright));
   border: 3px solid transparent;
+  border-radius: 99px;
   background-clip: content-box;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--subtle));
+  background: rgb(var(--text-3));
   background-clip: content-box;
 }
 
-.shimmer {
+/* Loading placeholder, tuned to the console surfaces. */
+.pulse {
   position: relative;
   overflow: hidden;
-  background: rgb(var(--inset));
+  background: rgb(var(--sunken));
 }
-
-.shimmer::after {
+.pulse::after {
   content: "";
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgb(var(--panel) / 0.7),
-    transparent
-  );
-  animation: sweep 1.6s infinite;
+  background: linear-gradient(90deg, transparent, rgb(var(--hair) / 0.9), transparent);
+  animation: sweep 1.5s infinite;
 }
-
 @keyframes sweep {
   to {
     transform: translateX(100%);
   }
 }
 
-/* Stagger helper for the one orchestrated entrance on each page. */
-.stagger > * {
-  animation: rise-in 260ms cubic-bezier(0.32, 0.72, 0, 1) both;
+/*
+  One orchestrated entrance per page, and nothing else moves on its own. Motion that
+  answers a click is welcome; motion that happens at you is not.
+*/
+.enter > * {
+  animation: lift 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-.stagger > *:nth-child(1) { animation-delay: 0ms; }
-.stagger > *:nth-child(2) { animation-delay: 40ms; }
-.stagger > *:nth-child(3) { animation-delay: 80ms; }
-.stagger > *:nth-child(4) { animation-delay: 120ms; }
-.stagger > *:nth-child(5) { animation-delay: 160ms; }
-.stagger > *:nth-child(6) { animation-delay: 200ms; }
+.enter > *:nth-child(1) { animation-delay: 0ms; }
+.enter > *:nth-child(2) { animation-delay: 50ms; }
+.enter > *:nth-child(3) { animation-delay: 100ms; }
+.enter > *:nth-child(4) { animation-delay: 150ms; }
+.enter > *:nth-child(5) { animation-delay: 200ms; }
+.enter > *:nth-child(6) { animation-delay: 250ms; }
 
-@keyframes rise-in {
+@keyframes lift {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
     transform: none;
   }
+}
+
+/* The series chart draws itself in, once. */
+@keyframes trace {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+.trace {
+  animation: trace 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {

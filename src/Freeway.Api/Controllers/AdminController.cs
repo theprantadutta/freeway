@@ -140,6 +140,17 @@ public class AdminController : BaseApiController
         return HandleResult(result);
     }
 
+    /// <summary>
+    /// Everything the dashboard needs in one call: totals, a daily series, the lane
+    /// split, the leading models and projects, and the most recent requests.
+    /// </summary>
+    [HttpGet("analytics/overview")]
+    public async Task<ActionResult> GetOverview([FromQuery] int days = 30)
+    {
+        var result = await Mediator.Send(new GetOverviewQuery(days));
+        return HandleResult(result);
+    }
+
     [HttpGet("analytics/logs")]
     public async Task<ActionResult> GetUsageLogs(
         [FromQuery(Name = "project_id")] Guid projectId,
