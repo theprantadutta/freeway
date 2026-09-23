@@ -2,45 +2,60 @@ import { HTMLAttributes, forwardRef } from "react";
 import { cn } from "@/lib/utils/cn";
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
-  variant?: "default" | "success" | "warning" | "error" | "info" | "primary";
+  variant?:
+    | "default"
+    | "success"
+    | "warning"
+    | "error"
+    | "info"
+    | "primary"
+    | "accent"
+    | "outline";
   size?: "sm" | "md";
+  /** Shows a filled dot in the badge colour before the label. */
+  dot?: boolean;
 }
 
 const Badge = forwardRef<HTMLSpanElement, BadgeProps>(
-  ({ className, variant = "default", size = "sm", ...props }, ref) => {
+  ({ className, variant = "default", size = "sm", dot, children, ...props }, ref) => {
     const variants = {
-      default:
-        "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-      success:
-        "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-      warning:
-        "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-      error: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-      info: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-      primary:
-        "bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400",
+      default: "bg-inset text-muted",
+      success: "bg-ok/12 text-ok",
+      warning: "bg-warn/12 text-warn",
+      error: "bg-danger/12 text-danger",
+      info: "bg-info/12 text-info",
+      primary: "bg-brand/12 text-brand",
+      accent: "accent-tint accent-text",
+      outline: "border border-line text-muted",
     };
 
     const sizes = {
-      sm: "px-2 py-0.5 text-xs",
-      md: "px-2.5 py-1 text-sm",
+      sm: "h-5 px-2 text-micro gap-1.5",
+      md: "h-6 px-2.5 text-xs gap-1.5",
     };
 
     return (
       <span
         ref={ref}
         className={cn(
-          "inline-flex items-center font-medium rounded-full",
+          "inline-flex items-center font-medium rounded-full whitespace-nowrap",
           variants[variant],
           sizes[size],
           className
         )}
         {...props}
-      />
+      >
+        {dot && (
+          <span
+            className="h-1.5 w-1.5 rounded-full bg-current shrink-0"
+            aria-hidden
+          />
+        )}
+        {children}
+      </span>
     );
   }
 );
-
 Badge.displayName = "Badge";
 
 export { Badge };

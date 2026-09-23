@@ -1,49 +1,71 @@
-import { forwardRef, InputHTMLAttributes } from "react";
+import { forwardRef, InputHTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
+  hint?: string;
+  /** Rendered inside the field, before the text. */
+  leading?: ReactNode;
 }
 
 const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, label, error, id, ...props }, ref) => {
+  ({ className, label, error, hint, leading, id, ...props }, ref) => {
     const inputId = id || label?.toLowerCase().replace(/\s/g, "-");
+    const describedBy = error
+      ? `${inputId}-error`
+      : hint
+        ? `${inputId}-hint`
+        : undefined;
 
     return (
       <div className="w-full">
         {label && (
           <label
             htmlFor={inputId}
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5"
+            className="block text-sm font-medium text-ink mb-1.5"
           >
             {label}
           </label>
         )}
-        <input
-          ref={ref}
-          id={inputId}
-          className={cn(
-            "w-full px-3 py-2 border rounded-lg text-sm transition-colors",
-            "bg-white dark:bg-gray-900",
-            "border-gray-300 dark:border-gray-700",
-            "text-gray-900 dark:text-gray-100",
-            "placeholder:text-gray-500 dark:placeholder:text-gray-400",
-            "focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent",
-            "disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:cursor-not-allowed",
-            error && "border-red-500 focus:ring-red-500",
-            className
+        <div className="relative">
+          {leading && (
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-subtle">
+              {leading}
+            </span>
           )}
-          {...props}
-        />
-        {error && (
-          <p className="mt-1 text-sm text-red-500 dark:text-red-400">{error}</p>
-        )}
+          <input
+            ref={ref}
+            id={inputId}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={describedBy}
+            className={cn(
+              "h-9 w-full rounded-control border bg-panel px-3 text-sm text-ink",
+              "border-line-strong placeholder:text-subtle",
+              "transition-[border-color,box-shadow] duration-150 ease-swift",
+              "hover:border-subtle",
+              "focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/20",
+              "disabled:bg-inset disabled:text-subtle disabled:cursor-not-allowed",
+              leading && "pl-9",
+              error && "border-danger focus:border-danger focus:ring-danger/20",
+              className
+            )}
+            {...props}
+          />
+        </div>
+        {error ? (
+          <p id={`${inputId}-error`} className="mt-1.5 text-xs text-danger">
+            {error}
+          </p>
+        ) : hint ? (
+          <p id={`${inputId}-hint`} className="mt-1.5 text-xs text-subtle">
+            {hint}
+          </p>
+        ) : null}
       </div>
     );
   }
 );
-
 Input.displayName = "Input";
 
 export { Input };

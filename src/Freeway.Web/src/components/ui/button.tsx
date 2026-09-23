@@ -1,49 +1,41 @@
 import { forwardRef, ButtonHTMLAttributes } from "react";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "primary" | "secondary" | "outline" | "ghost" | "danger";
-  size?: "sm" | "md" | "lg";
+  variant?: "primary" | "secondary" | "outline" | "ghost" | "danger" | "accent";
+  size?: "sm" | "md" | "lg" | "icon";
   isLoading?: boolean;
 }
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   (
-    {
-      className,
-      variant = "primary",
-      size = "md",
-      isLoading,
-      disabled,
-      children,
-      ...props
-    },
+    { className, variant = "primary", size = "md", isLoading, disabled, children, ...props },
     ref
   ) => {
     const variants = {
-      primary:
-        "bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500 dark:bg-primary-500 dark:hover:bg-primary-600",
-      secondary:
-        "bg-gray-100 text-gray-900 hover:bg-gray-200 focus:ring-gray-500 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700",
-      outline:
-        "border border-gray-300 bg-transparent text-gray-700 hover:bg-gray-50 focus:ring-gray-500 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800",
-      ghost:
-        "bg-transparent text-gray-700 hover:bg-gray-100 focus:ring-gray-500 dark:text-gray-300 dark:hover:bg-gray-800",
-      danger:
-        "bg-red-600 text-white hover:bg-red-700 focus:ring-red-500 dark:bg-red-500 dark:hover:bg-red-600",
+      primary: "bg-brand text-white hover:brightness-110 active:brightness-95",
+      accent: "bg-accent text-white hover:brightness-110 active:brightness-95",
+      secondary: "bg-inset text-ink hover:bg-line",
+      outline: "border border-line-strong bg-panel text-ink hover:bg-inset",
+      ghost: "bg-transparent text-muted hover:bg-inset hover:text-ink",
+      danger: "bg-danger text-white hover:brightness-110 active:brightness-95",
     };
 
     const sizes = {
-      sm: "px-3 py-1.5 text-sm",
-      md: "px-4 py-2 text-sm",
-      lg: "px-6 py-3 text-base",
+      sm: "h-8 px-3 text-xs gap-1.5",
+      md: "h-9 px-3.5 text-sm gap-2",
+      lg: "h-11 px-5 text-base gap-2",
+      icon: "h-9 w-9",
     };
 
     return (
       <button
         ref={ref}
         className={cn(
-          "inline-flex items-center justify-center font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed",
+          "inline-flex items-center justify-center whitespace-nowrap rounded-control font-medium",
+          "transition-[background-color,filter,opacity] duration-150 ease-swift",
+          "disabled:opacity-50 disabled:pointer-events-none",
           variants[variant],
           sizes[size],
           className
@@ -51,34 +43,12 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={disabled || isLoading}
         {...props}
       >
-        {isLoading && (
-          <svg
-            className="animate-spin -ml-1 mr-2 h-4 w-4"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            />
-          </svg>
-        )}
+        {isLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
         {children}
       </button>
     );
   }
 );
-
 Button.displayName = "Button";
 
 export { Button };

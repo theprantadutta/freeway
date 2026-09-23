@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useCallback } from "react";
+import { ReactNode, useEffect, useCallback, useRef } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
@@ -21,6 +21,8 @@ export function Dialog({
   children,
   className,
 }: DialogProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
   const handleEscape = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -29,55 +31,55 @@ export function Dialog({
   );
 
   useEffect(() => {
-    if (isOpen) {
-      document.addEventListener("keydown", handleEscape);
-      document.body.style.overflow = "hidden";
-    }
+    if (!isOpen) return;
+    document.addEventListener("keydown", handleEscape);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    // Move focus into the dialog so keyboard users are not left behind it.
+    panelRef.current?.focus();
     return () => {
       document.removeEventListener("keydown", handleEscape);
-      document.body.style.overflow = "unset";
+      document.body.style.overflow = previous;
     };
   }, [isOpen, handleEscape]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        className="absolute inset-0 bg-ink/40 backdrop-blur-[2px] animate-scale-in"
         onClick={onClose}
+        aria-hidden
       />
-
-      {/* Dialog */}
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
         className={cn(
-          "relative z-10 w-full max-w-md mx-4 bg-white dark:bg-gray-900 rounded-xl shadow-xl animate-fade-in",
+          "relative z-10 w-full sm:max-w-md bg-panel border border-line shadow-modal outline-none",
+          "rounded-t-modal sm:rounded-modal animate-slide-over",
           className
         )}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-800">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {title}
-            </h2>
+        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-line">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-ink">{title}</h2>
             {description && (
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {description}
-              </p>
+              <p className="mt-0.5 text-sm text-muted">{description}</p>
             )}
           </div>
           <button
             onClick={onClose}
-            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label="Close"
+            className="-mr-1 -mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-control text-subtle transition-colors hover:bg-inset hover:text-ink"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4" />
           </button>
         </div>
-
-        {/* Content */}
-        <div className="p-6">{children}</div>
+        <div className="p-5">{children}</div>
       </div>
     </div>
   );
@@ -85,6 +87,8 @@ export function Dialog({
 
 export function DialogActions({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-center justify-end gap-3 mt-6">{children}</div>
+    <div className="mt-6 flex items-center justify-end gap-2 border-t border-line pt-4 -mx-5 px-5 -mb-5 pb-5">
+      {children}
+    </div>
   );
 }

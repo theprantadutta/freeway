@@ -16,8 +16,11 @@ export function MobileNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 safe-area-pb">
-      <div className="flex items-center justify-around h-16">
+    <nav
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-line bg-panel/95 backdrop-blur-md md:hidden"
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+    >
+      <div className="flex items-stretch justify-around">
         {navItems.map((item) => {
           const isActive =
             pathname === item.href ||
@@ -27,15 +30,20 @@ export function MobileNav() {
             <Link
               key={item.href}
               href={item.href}
+              aria-current={isActive ? "page" : undefined}
               className={cn(
-                "flex flex-col items-center justify-center gap-1 px-4 py-2 rounded-lg transition-colors",
-                isActive
-                  ? "text-primary-600 dark:text-primary-400"
-                  : "text-gray-500 dark:text-gray-400"
+                "relative flex flex-1 flex-col items-center gap-1 py-2.5 transition-colors",
+                isActive ? "text-brand" : "text-subtle"
               )}
             >
-              <item.icon className="h-5 w-5" />
-              <span className="text-xs font-medium">{item.label}</span>
+              {isActive && (
+                <span
+                  className="absolute inset-x-5 top-0 h-0.5 rounded-full bg-brand"
+                  aria-hidden
+                />
+              )}
+              <item.icon className="h-[18px] w-[18px]" aria-hidden />
+              <span className="text-micro font-medium">{item.label}</span>
             </Link>
           );
         })}
