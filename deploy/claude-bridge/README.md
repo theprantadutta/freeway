@@ -27,6 +27,41 @@ So roughly **9.4k tokens of overhead per request** before the caller's own promp
 about two seconds of latency. That is fine at low volume and will exhaust a
 subscription quickly under real traffic.
 
+### Why it is not faster or cheaper than this
+
+All of the obvious levers were tried and measured, and every one of them was worse.
+Recorded here so nobody spends the money finding out twice.
+
+**The flags are load-bearing.** Straying from Claude Code's usual shape loses the
+large prefix the upstream cache already holds, and the bill goes up:
+
+| invocation | cost per request |
+|---|---|
+| as invoked here | **$0.0247** |
+| default system prompt + `--exclude-dynamic-system-prompt-sections` | $0.0309 |
+| `--restricted` | $0.0589 |
+| `--disable-slash-commands` | $0.1021 |
+
+`--exclude-dynamic-system-prompt-sections` was removed because the CLI ignores it
+whenever `--system-prompt` is passed, which here is always.
+
+**Keeping the prompt cache warm does not work.** The CLI puts its cache breakpoint
+after the last message, so a request only reads the prefix from cache when the whole
+prompt is byte-identical to a recent one. Repeating one prompt costs $0.002 instead
+of $0.025 — but real traffic never repeats a prompt, so every real request pays the
+cold price. Nothing the bridge can do from outside the CLI changes that.
+
+**A persistent session is the wrong shape.** `--resume` and `--continue` replay the
+earlier conversation, so one caller's messages would land in the next caller's
+context. This is a shared gateway; each request gets its own invocation.
+
+**Pre-spawning does not help.** A process started 2.5s ahead of the prompt saved
+roughly 300ms, which is inside the run-to-run noise (startup measured 1.2–2.4s
+either way). Not worth a standing pool of processes.
+
+Of the ~3.5s a request takes, about 2s is the API call itself and the rest is CLI
+startup. Both are the CLI's, not the bridge's.
+
 ## Install
 
 ### As a compose service (recommended)

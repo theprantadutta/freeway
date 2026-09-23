@@ -56,10 +56,30 @@ function release() {
   else inFlight--;
 }
 
+// Used when the caller sends no system message of its own, and by the health probe
+// so that the probe's timing reflects a real request.
+const SYSTEM_PROMPT =
+  process.env.BRIDGE_SYSTEM_PROMPT ||
+  "You are a helpful assistant. Answer the user directly and concisely. Do not use tools.";
+
 /**
  * Strips the agent scaffolding down as far as the CLI allows. The default
  * invocation carries ~27k tokens of system prompt and tool definitions before the
  * caller's own prompt; this gets it to roughly a third of that.
+ *
+ * These exact flags were measured against the alternatives; every variant tried cost
+ * more per request, because deviating from Claude Code's usual shape loses the large
+ * shared prefix the upstream cache already holds:
+ *
+ *   this set                                       $0.0247
+ *   default system prompt + --exclude-dynamic...   $0.0309
+ *   --restricted                                   $0.0589
+ *   --disable-slash-commands                       $0.1021
+ *
+ * So treat it as load-bearing rather than arbitrary, and re-measure before changing it.
+ *
+ * `--exclude-dynamic-system-prompt-sections` is deliberately absent: the CLI ignores
+ * it whenever --system-prompt is given, which is always, here.
  */
 function buildArgs(systemPrompt) {
   return [
@@ -67,7 +87,6 @@ function buildArgs(systemPrompt) {
     "--output-format", "json",
     "--max-turns", "1",
     "--system-prompt", systemPrompt,
-    "--exclude-dynamic-system-prompt-sections",
     "--strict-mcp-config",
     "--setting-sources", "",
     "--permission-mode", "default",
@@ -191,6 +210,17 @@ function runClaude(prompt, systemPrompt) {
       const usage = parsed.usage || {};
       const model = Object.keys(parsed.modelUsage || {})[0] || null;
 
+      // Worth a line of its own. A request whose prompt is byte-identical to a recent
+      // one reads the whole prefix from cache and costs about $0.002 instead of
+      // $0.025; distinct prompts never do, since the CLI puts its cache breakpoint
+      // after the last message. So `created` on every line is expected rather than a
+      // fault -- but a jump in it means the prefix changed, and that is worth chasing.
+      const created = usage.cache_creation_input_tokens || 0;
+      const read = usage.cache_read_input_tokens || 0;
+      console.log(
+        `claude ok in ${durationMs}ms, cache created=${created} read=${read}, $${(parsed.total_cost_usd ?? 0).toFixed(6)} list`
+      );
+
       done({
         ok: true,
         text: parsed.result ?? "",
@@ -224,7 +254,9 @@ async function probe() {
   await acquire();
   let result;
   try {
-    result = await runClaude("Reply with exactly: ok", "You are a health probe. Answer in one word.");
+    // The same system prompt a default completion uses, so the latency this reports
+    // is the latency a real request would see.
+    result = await runClaude("Reply with exactly: ok", SYSTEM_PROMPT);
   } finally {
     release();
   }
@@ -299,10 +331,11 @@ function render(messages) {
           .map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${m.content}`)
           .join("\n\n") + "\n\nAssistant:";
 
+  // The caller's system message goes through as the system prompt. Folding it into
+  // the transcript to keep one constant prefix was tried and measured: it changes
+  // nothing about what the upstream cache holds, so the straightforward thing wins.
   return {
-    system:
-      system ||
-      "You are a helpful assistant. Answer the user directly and concisely. Do not use tools.",
+    system: system || SYSTEM_PROMPT,
     prompt: transcript,
   };
 }
