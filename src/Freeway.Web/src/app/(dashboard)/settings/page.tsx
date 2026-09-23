@@ -1,24 +1,25 @@
 "use client";
 
-import { useAuthStore } from "@/lib/stores/auth-store";
-import { useThemeStore } from "@/lib/stores/theme-store";
-import { Header } from "@/components/layout/header";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
 import {
-  User,
   Link as LinkIcon,
   Key,
-  Palette,
   Sun,
   Moon,
   Monitor,
   LogOut,
-  Zap,
-  Info,
   Shield,
+  CheckCircle2,
+  CircleAlert,
 } from "lucide-react";
+import { useAuthStore } from "@/lib/stores/auth-store";
+import { useThemeStore } from "@/lib/stores/theme-store";
+import { Header } from "@/components/layout/header";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { LaneMark } from "@/components/brand/lane-mark";
+import { ACCENTS, type AccentKey } from "@/lib/theme/accents";
 import { cn } from "@/lib/utils/cn";
 import { formatDateTime } from "@/lib/utils/format";
 
@@ -35,227 +36,237 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <Header title="Settings" subtitle="Manage your preferences" />
+    <div className="flex h-full flex-col">
+      <Header title="Settings" subtitle="Your account and this panel" />
 
-      <div className="flex-1 p-4 md:p-6 space-y-6">
-        {/* User Info */}
-        <section>
-          <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">
-            Account
-          </h3>
-          <Card>
-            <CardContent className="py-6">
-              <div className="flex items-start gap-4">
-                <div className="p-3 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
-                  <User className="h-6 w-6 text-primary-600 dark:text-primary-400" />
+      <div className="flex-1 space-y-6 p-4 md:p-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Account</CardTitle>
+            <Button variant="ghost" size="sm" onClick={handleLogout}>
+              <LogOut className="h-3.5 w-3.5" aria-hidden />
+              Sign out
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-start gap-4">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-panel bg-brand/12 text-base font-semibold text-brand">
+                {(user?.name || user?.email || "?").charAt(0).toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="truncate text-base font-semibold text-ink">
+                    {user?.name || user?.email?.split("@")[0]}
+                  </h3>
+                  {user?.is_admin && (
+                    <Badge variant="warning" dot>
+                      <Shield className="h-3 w-3" aria-hidden />
+                      Admin
+                    </Badge>
+                  )}
                 </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-medium text-gray-900 dark:text-gray-100">
-                      {user?.name || user?.email}
-                    </h3>
-                    {user?.is_admin && (
-                      <Badge variant="warning" className="text-xs">
-                        <Shield className="h-3 w-3 mr-1" />
-                        Admin
-                      </Badge>
-                    )}
+                <p className="truncate text-sm text-muted">{user?.email}</p>
+                <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <dt className="text-xs text-subtle">Member since</dt>
+                    <dd className="mt-0.5 text-sm text-ink">
+                      {user?.created_at ? formatDateTime(user.created_at) : "—"}
+                    </dd>
                   </div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                    {user?.email}
-                  </p>
-                  <div className="mt-3 text-sm text-gray-500 dark:text-gray-400">
-                    <p>Member since: {user?.created_at ? formatDateTime(user.created_at) : "N/A"}</p>
-                    {user?.last_login_at && (
-                      <p>Last login: {formatDateTime(user.last_login_at)}</p>
-                    )}
+                  <div>
+                    <dt className="text-xs text-subtle">Last signed in</dt>
+                    <dd className="mt-0.5 text-sm text-ink">
+                      {user?.last_login_at
+                        ? formatDateTime(user.last_login_at)
+                        : "—"}
+                    </dd>
                   </div>
-                </div>
-                <Button variant="danger" size="sm" onClick={handleLogout}>
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Logout
-                </Button>
+                </dl>
               </div>
-            </CardContent>
-          </Card>
-        </section>
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* API Connection */}
-        <section>
-          <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">
-            API Connection
-          </h3>
-          <Card>
-            <CardContent className="py-0 divide-y divide-gray-100 dark:divide-gray-800">
-              <SettingsRow
-                icon={LinkIcon}
-                iconColor="text-blue-500"
-                title="API Endpoint"
-                value={apiUrl}
-                mono
-              />
-              <SettingsRow
-                icon={Key}
-                iconColor="text-amber-500"
-                title="Authentication"
-                value="JWT Bearer Token"
-              />
-            </CardContent>
-          </Card>
-        </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Gateway connection</CardTitle>
+            <ApiStatus apiUrl={apiUrl} />
+          </CardHeader>
+          <CardContent className="divide-y divide-line py-0">
+            <SettingsRow
+              icon={LinkIcon}
+              accent={ACCENTS.low.scope}
+              title="API endpoint"
+              value={apiUrl}
+              mono
+            />
+            <SettingsRow
+              icon={Key}
+              accent={ACCENTS.moderate.scope}
+              title="Authentication"
+              value="JWT bearer token"
+            />
+          </CardContent>
+        </Card>
 
-        {/* Appearance */}
-        <section>
-          <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">
-            Appearance
-          </h3>
-          <Card>
-            <CardContent className="py-6">
-              <div className="flex items-center gap-4 mb-4">
-                <div className="p-2.5 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
-                  <Palette className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-                </div>
-                <div>
-                  <h4 className="font-medium text-gray-900 dark:text-gray-100">
-                    Theme Mode
-                  </h4>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Choose your preferred theme
-                  </p>
-                </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Appearance</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <fieldset>
+              <legend className="text-sm text-muted">
+                Theme. System follows your device setting.
+              </legend>
+              <div className="mt-3 grid grid-cols-3 gap-2.5">
+                {(
+                  [
+                    { value: "light", label: "Light", icon: Sun },
+                    { value: "system", label: "System", icon: Monitor },
+                    { value: "dark", label: "Dark", icon: Moon },
+                  ] as const
+                ).map((option) => {
+                  const isActive = theme === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      onClick={() => setTheme(option.value)}
+                      aria-pressed={isActive}
+                      className={cn(
+                        "flex flex-col items-center gap-2 rounded-panel border px-4 py-4",
+                        "transition-[border-color,background-color] duration-150 ease-swift",
+                        isActive
+                          ? "border-brand bg-brand/[0.07] text-brand"
+                          : "border-line text-muted hover:border-line-strong hover:text-ink"
+                      )}
+                    >
+                      <option.icon className="h-4 w-4" aria-hidden />
+                      <span className="text-sm font-medium">{option.label}</span>
+                    </button>
+                  );
+                })}
               </div>
+            </fieldset>
+          </CardContent>
+        </Card>
 
-              <div className="grid grid-cols-3 gap-3">
-                <ThemeButton
-                  icon={Sun}
-                  label="Light"
-                  isActive={theme === "light"}
-                  onClick={() => setTheme("light")}
-                />
-                <ThemeButton
-                  icon={Monitor}
-                  label="System"
-                  isActive={theme === "system"}
-                  onClick={() => setTheme("system")}
-                />
-                <ThemeButton
-                  icon={Moon}
-                  label="Dark"
-                  isActive={theme === "dark"}
-                  onClick={() => setTheme("dark")}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Lane colours</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted">
+              Each request type keeps the same colour across the panel. The paid
+              tiers run from green to rose as cost rises.
+            </p>
+            <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+              {(
+                ["free", "low", "moderate", "premium", "image"] as AccentKey[]
+              ).map((key) => {
+                const def = ACCENTS[key];
+                const Icon = def.icon;
+                return (
+                  <li
+                    key={key}
+                    className={cn(
+                      def.scope,
+                      "flex items-center gap-3 rounded-control border border-line px-3.5 py-2.5"
+                    )}
+                  >
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[0.3125rem] accent-tint accent-text">
+                      <Icon className="h-3.5 w-3.5" aria-hidden />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-ink">
+                        {def.label}
+                      </span>
+                      <code className="block truncate font-mono text-xs text-subtle">
+                        {def.model}
+                      </code>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
 
-        {/* About */}
-        <section>
-          <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">
-            About
-          </h3>
-          <Card>
-            <CardContent className="py-0 divide-y divide-gray-100 dark:divide-gray-800">
-              <SettingsRow
-                icon={Zap}
-                iconColor="text-primary-500"
-                title="Freeway Control Panel"
-                value="Version 1.0.0"
-              />
-              <SettingsRow
-                icon={Info}
-                iconColor="text-indigo-500"
-                title="Built with"
-                value="Next.js 15, Tailwind CSS"
-              />
-            </CardContent>
-          </Card>
-        </section>
+        <Card>
+          <CardContent className="flex items-center gap-3">
+            <span className="h-7 w-7 shrink-0">
+              <LaneMark />
+            </span>
+            <p className="text-sm text-muted">
+              Freeway control panel
+              <span className="mx-1.5 text-subtle">·</span>
+              <span className="tnum">v1.0.0</span>
+            </p>
+          </CardContent>
+        </Card>
       </div>
     </div>
+  );
+}
+
+/** Live check so "connection" is a fact on screen rather than a label. */
+function ApiStatus({ apiUrl }: { apiUrl: string }) {
+  const [state, setState] = useState<"checking" | "up" | "down">("checking");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${apiUrl}/health`, { cache: "no-store" })
+      .then((r) => {
+        if (!cancelled) setState(r.ok ? "up" : "down");
+      })
+      .catch(() => {
+        if (!cancelled) setState("down");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiUrl]);
+
+  if (state === "checking") {
+    return <Badge variant="default">Checking…</Badge>;
+  }
+
+  return state === "up" ? (
+    <Badge variant="success" dot>
+      <CheckCircle2 className="h-3 w-3" aria-hidden />
+      Reachable
+    </Badge>
+  ) : (
+    <Badge variant="error" dot>
+      <CircleAlert className="h-3 w-3" aria-hidden />
+      Unreachable
+    </Badge>
   );
 }
 
 function SettingsRow({
   icon: Icon,
-  iconColor,
+  accent,
   title,
   value,
   mono,
 }: {
-  icon: typeof User;
-  iconColor: string;
+  icon: typeof Key;
+  accent: string;
   title: string;
   value: string;
   mono?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-4 py-4">
-      <div
-        className={cn(
-          "p-2 rounded-lg bg-gray-100 dark:bg-gray-800",
-          iconColor
-        )}
-      >
-        <Icon className="h-4 w-4" />
-      </div>
-      <div className="flex-1">
-        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-          {title}
-        </p>
-        <p
-          className={cn(
-            "text-sm text-gray-500 dark:text-gray-400 mt-0.5",
-            mono && "font-mono"
-          )}
-        >
+    <div className={cn(accent, "flex items-center gap-3.5 py-4")}>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-control accent-tint accent-text">
+        <Icon className="h-4 w-4" aria-hidden />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-ink">{title}</p>
+        <p className={cn("mt-0.5 truncate text-sm text-muted", mono && "font-mono")}>
           {value}
         </p>
       </div>
     </div>
-  );
-}
-
-function ThemeButton({
-  icon: Icon,
-  label,
-  isActive,
-  onClick,
-}: {
-  icon: typeof Sun;
-  label: string;
-  isActive: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "flex flex-col items-center gap-2 p-4 rounded-lg border-2 transition-colors",
-        isActive
-          ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20"
-          : "border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700"
-      )}
-    >
-      <Icon
-        className={cn(
-          "h-5 w-5",
-          isActive
-            ? "text-primary-600 dark:text-primary-400"
-            : "text-gray-500 dark:text-gray-400"
-        )}
-      />
-      <span
-        className={cn(
-          "text-sm font-medium",
-          isActive
-            ? "text-primary-600 dark:text-primary-400"
-            : "text-gray-600 dark:text-gray-400"
-        )}
-      >
-        {label}
-      </span>
-    </button>
   );
 }

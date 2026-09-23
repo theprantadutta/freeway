@@ -15,18 +15,16 @@ interface TabsProps {
   children: ReactNode;
   className?: string;
   onChange?: (value: string) => void;
+  /** Controlled value. When set, the tab list follows it. */
+  value?: string;
 }
 
-export function Tabs({
-  defaultValue,
-  children,
-  className,
-  onChange,
-}: TabsProps) {
-  const [activeTab, setActiveTab] = useState(defaultValue);
+export function Tabs({ defaultValue, children, className, onChange, value }: TabsProps) {
+  const [internal, setInternal] = useState(defaultValue);
+  const activeTab = value ?? internal;
 
   const handleTabChange = (tab: string) => {
-    setActiveTab(tab);
+    setInternal(tab);
     onChange?.(tab);
   };
 
@@ -46,8 +44,9 @@ export function TabsList({
 }) {
   return (
     <div
+      role="tablist"
       className={cn(
-        "flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg",
+        "inline-flex items-center gap-0.5 rounded-control bg-inset p-0.5",
         className
       )}
     >
@@ -60,9 +59,11 @@ interface TabsTriggerProps {
   value: string;
   children: ReactNode;
   className?: string;
+  /** Accent scope applied when this tab is active. */
+  accent?: string;
 }
 
-export function TabsTrigger({ value, children, className }: TabsTriggerProps) {
+export function TabsTrigger({ value, children, className, accent }: TabsTriggerProps) {
   const context = useContext(TabsContext);
   if (!context) throw new Error("TabsTrigger must be used within Tabs");
 
@@ -70,12 +71,15 @@ export function TabsTrigger({ value, children, className }: TabsTriggerProps) {
 
   return (
     <button
+      role="tab"
+      aria-selected={isActive}
       onClick={() => context.setActiveTab(value)}
       className={cn(
-        "flex-1 px-4 py-2 text-sm font-medium rounded-md transition-colors",
+        "relative flex-1 whitespace-nowrap rounded-[0.3125rem] px-3 py-1.5 text-sm font-medium",
+        "transition-[background-color,color] duration-150 ease-swift",
         isActive
-          ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm"
-          : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200",
+          ? cn("bg-panel shadow-pop", accent ? `${accent} accent-text` : "text-ink")
+          : "text-muted hover:text-ink",
         className
       )}
     >
@@ -84,17 +88,17 @@ export function TabsTrigger({ value, children, className }: TabsTriggerProps) {
   );
 }
 
-interface TabsContentProps {
+export function TabsContent({
+  value,
+  children,
+  className,
+}: {
   value: string;
   children: ReactNode;
   className?: string;
-}
-
-export function TabsContent({ value, children, className }: TabsContentProps) {
+}) {
   const context = useContext(TabsContext);
   if (!context) throw new Error("TabsContent must be used within Tabs");
-
   if (context.activeTab !== value) return null;
-
-  return <div className={cn("mt-4", className)}>{children}</div>;
+  return <div className={cn("mt-4 animate-rise-in", className)}>{children}</div>;
 }

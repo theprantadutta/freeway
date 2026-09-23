@@ -2,51 +2,47 @@
 
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Brain, Check, Sparkles, Image, Star } from "lucide-react";
+import { Search, Check, Star, SlidersHorizontal } from "lucide-react";
 import { Header } from "@/components/layout/header";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SkeletonList } from "@/components/ui/skeleton";
-import { EmptyState } from "@/components/ui/empty-state";
+import { EmptyState, ErrorState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { modelsApi } from "@/lib/api/models";
 import { formatNumber, formatCurrency } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
-import {
-  PAID_TIERS,
-  PAID_TIER_LABELS,
-  type ModelInfo,
-  type PaidTier,
-} from "@/lib/types";
+import { ACCENTS, PAID_TIER_ACCENT, type AccentKey } from "@/lib/theme/accents";
+import { PAID_TIERS, type ModelInfo, type PaidTier } from "@/lib/types";
 
-const TIER_HINTS: Record<PaidTier, string> = {
-  low: "Cheapest available models. This is what a plain `paid` request uses.",
-  moderate: "Balanced cost and capability. Curated mid-range models first.",
-  premium: "Highest capability. Curated frontier models first — the most expensive tier.",
-};
+type TabKey = "free" | "paid" | "image";
 
 export default function ModelsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState("free");
+  const [activeTab, setActiveTab] = useState<TabKey>("free");
   const [paidTier, setPaidTier] = useState<PaidTier>("low");
 
-  // Queries
-  const { data: freeModels, isLoading: loadingFree } = useQuery({
+  // The accent in play follows the tab, and for paid it follows the tier.
+  const accentKey: AccentKey =
+    activeTab === "paid" ? PAID_TIER_ACCENT[paidTier] : activeTab;
+  const accent = ACCENTS[accentKey];
+
+  const freeQuery = useQuery({
     queryKey: ["models", "free"],
     queryFn: () => modelsApi.getFreeModels(),
   });
 
-  const { data: paidModels, isLoading: loadingPaid } = useQuery({
+  const paidQuery = useQuery({
     queryKey: ["models", "paid", paidTier],
     queryFn: () => modelsApi.getPaidModelsForTier(paidTier),
   });
 
-  const { data: imageModels, isLoading: loadingImage } = useQuery({
+  const imageQuery = useQuery({
     queryKey: ["models", "image"],
     queryFn: () => modelsApi.getImageModels(),
   });
@@ -66,16 +62,13 @@ export default function ModelsPage() {
     queryFn: () => modelsApi.getSelectedImageModel(),
   });
 
-  // Mutations
   const setFreeMutation = useMutation({
     mutationFn: (modelId: string) => modelsApi.setSelectedFreeModel(modelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["model", "free"] });
-      toast("Free model updated successfully", "success");
+      toast("Free model selected", "success");
     },
-    onError: () => {
-      toast("Failed to update free model", "error");
-    },
+    onError: () => toast("Could not select that free model", "error"),
   });
 
   const setPaidMutation = useMutation({
@@ -83,89 +76,45 @@ export default function ModelsPage() {
       modelsApi.setSelectedPaidModelForTier(paidTier, modelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["model", "paid"] });
+      toast(`${ACCENTS[PAID_TIER_ACCENT[paidTier]].label} model selected`, "success");
+    },
+    onError: () =>
       toast(
-        `${PAID_TIER_LABELS[paidTier]} paid model updated successfully`,
-        "success"
-      );
-    },
-    onError: () => {
-      toast(`Failed to update ${PAID_TIER_LABELS[paidTier]} paid model`, "error");
-    },
+        `Could not select that ${ACCENTS[PAID_TIER_ACCENT[paidTier]].label.toLowerCase()} model`,
+        "error"
+      ),
   });
 
   const setImageMutation = useMutation({
     mutationFn: (modelId: string) => modelsApi.setSelectedImageModel(modelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["model", "image"] });
-      toast("Image model updated successfully", "success");
+      toast("Image model selected", "success");
     },
-    onError: () => {
-      toast("Failed to update image model", "error");
-    },
+    onError: () => toast("Could not select that image model", "error"),
   });
 
-  // Filter models by search
-  const filteredFree = useMemo(() => {
-    if (!freeModels) return [];
-    if (!search) return freeModels;
+  const activeQuery =
+    activeTab === "free" ? freeQuery : activeTab === "paid" ? paidQuery : imageQuery;
+
+  const models = useMemo(() => {
+    const list = activeQuery.data ?? [];
+    if (!search) return list;
     const q = search.toLowerCase();
-    return freeModels.filter(
+    return list.filter(
       (m) =>
         m.model_id.toLowerCase().includes(q) ||
         m.model_name.toLowerCase().includes(q)
     );
-  }, [freeModels, search]);
+  }, [activeQuery.data, search]);
 
-  const filteredPaid = useMemo(() => {
-    if (!paidModels) return [];
-    if (!search) return paidModels;
-    const q = search.toLowerCase();
-    return paidModels.filter(
-      (m) =>
-        m.model_id.toLowerCase().includes(q) ||
-        m.model_name.toLowerCase().includes(q)
-    );
-  }, [paidModels, search]);
-
-  const filteredImage = useMemo(() => {
-    if (!imageModels) return [];
-    if (!search) return imageModels;
-    const q = search.toLowerCase();
-    return imageModels.filter(
-      (m) =>
-        m.model_id.toLowerCase().includes(q) ||
-        m.model_name.toLowerCase().includes(q)
-    );
-  }, [imageModels, search]);
-
-  const handleSelectModel = (modelId: string) => {
-    if (activeTab === "free") {
-      setFreeMutation.mutate(modelId);
-    } else if (activeTab === "paid") {
-      setPaidMutation.mutate(modelId);
-    } else {
-      setImageMutation.mutate(modelId);
-    }
-  };
-
-  const isLoading =
-    activeTab === "free"
-      ? loadingFree
-      : activeTab === "paid"
-        ? loadingPaid
-        : loadingImage;
-  const models =
-    activeTab === "free"
-      ? filteredFree
-      : activeTab === "paid"
-        ? filteredPaid
-        : filteredImage;
   const selectedModelId =
     activeTab === "free"
       ? selectedFree?.model_id
       : activeTab === "paid"
         ? selectedPaid?.model_id
         : selectedImage?.model_id;
+
   const isMutating =
     activeTab === "free"
       ? setFreeMutation.isPending
@@ -173,93 +122,139 @@ export default function ModelsPage() {
         ? setPaidMutation.isPending
         : setImageMutation.isPending;
 
-  return (
-    <div className="flex flex-col h-full">
-      <Header title="Models" subtitle="Manage AI model selection" />
+  const handleSelectModel = (modelId: string) => {
+    if (activeTab === "free") setFreeMutation.mutate(modelId);
+    else if (activeTab === "paid") setPaidMutation.mutate(modelId);
+    else setImageMutation.mutate(modelId);
+  };
 
-      <div className="flex-1 p-4 md:p-6 space-y-4">
-        {/* Search and Tabs */}
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Search models..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
+  const totalCount = activeQuery.data?.length ?? 0;
+
+  return (
+    <div className="flex h-full flex-col">
+      <Header
+        title="Models"
+        subtitle="Choose what each lane routes to"
+        actions={
           <Tabs
             defaultValue="free"
-            onChange={(v) => setActiveTab(v)}
-            className="w-full sm:w-auto"
+            value={activeTab}
+            onChange={(v) => setActiveTab(v as TabKey)}
           >
-            <TabsList className="w-full sm:w-auto">
-              <TabsTrigger value="free">Free</TabsTrigger>
-              <TabsTrigger value="paid">Paid</TabsTrigger>
-              <TabsTrigger value="image">Image</TabsTrigger>
+            <TabsList>
+              <TabsTrigger value="free" accent={ACCENTS.free.scope}>
+                Free
+              </TabsTrigger>
+              <TabsTrigger value="paid" accent={accent.scope}>
+                Paid
+              </TabsTrigger>
+              <TabsTrigger value="image" accent={ACCENTS.image.scope}>
+                Image
+              </TabsTrigger>
             </TabsList>
           </Tabs>
-        </div>
+        }
+      />
 
-        {/* Paid tier selector */}
+      <div className="flex-1 space-y-4 p-4 md:p-6">
         {activeTab === "paid" && (
-          <div className="space-y-2">
+          <div className="flex flex-col gap-3 rounded-panel border border-line bg-panel p-3 sm:flex-row sm:items-center sm:gap-4">
             <div
               role="tablist"
               aria-label="Paid tier"
-              className="inline-flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg"
+              className="flex items-center gap-0.5 rounded-control bg-inset p-0.5"
             >
-              {PAID_TIERS.map((tier) => (
-                <button
-                  key={tier}
-                  role="tab"
-                  aria-selected={paidTier === tier}
-                  onClick={() => setPaidTier(tier)}
-                  className={cn(
-                    "px-4 py-1.5 text-sm font-medium rounded-md transition-colors",
-                    paidTier === tier
-                      ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm"
-                      : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
-                  )}
-                >
-                  {PAID_TIER_LABELS[tier]}
-                </button>
-              ))}
+              {PAID_TIERS.map((tier) => {
+                const tierAccent = ACCENTS[PAID_TIER_ACCENT[tier]];
+                const isActive = paidTier === tier;
+                return (
+                  <button
+                    key={tier}
+                    role="tab"
+                    aria-selected={isActive}
+                    onClick={() => setPaidTier(tier)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-[0.3125rem] px-3 py-1.5 text-sm font-medium",
+                      "transition-[background-color,color] duration-150 ease-swift",
+                      isActive
+                        ? cn(tierAccent.scope, "bg-panel accent-text shadow-pop")
+                        : "text-muted hover:text-ink"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        tierAccent.scope,
+                        "h-1.5 w-1.5 rounded-full accent-bg"
+                      )}
+                      aria-hidden
+                    />
+                    {tierAccent.label}
+                  </button>
+                );
+              })}
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {TIER_HINTS[paidTier]} Request it with{" "}
-              <code className="font-mono text-gray-700 dark:text-gray-300">
-                &quot;model&quot;: &quot;paid:{paidTier}&quot;
+            <p className={cn(accent.scope, "flex-1 text-xs leading-relaxed text-muted")}>
+              {accent.hint} Request it with{" "}
+              <code className="rounded bg-inset px-1 py-0.5 font-mono text-ink">
+                {accent.model}
               </code>
-              .
             </p>
           </div>
         )}
 
-        {/* Models List */}
-        {isLoading ? (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Input
+            placeholder="Search by name or ID"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            leading={<Search className="h-4 w-4" />}
+            className="sm:max-w-sm"
+            aria-label="Search models"
+          />
+          <p className="text-sm text-subtle">
+            {search
+              ? `${models.length} of ${totalCount} models`
+              : `${totalCount} models`}
+            {activeTab === "paid" && " in this tier, in fallback order"}
+          </p>
+        </div>
+
+        {activeQuery.isLoading ? (
           <SkeletonList count={5} />
+        ) : activeQuery.isError ? (
+          <ErrorState
+            title="Could not load models"
+            description="The gateway did not return its model catalog. It refreshes daily, so a restart may be needed."
+            onRetry={() => activeQuery.refetch()}
+          />
         ) : models.length === 0 ? (
           <EmptyState
-            icon={Brain}
-            title="No models found"
+            className={accent.scope}
+            icon={search ? Search : SlidersHorizontal}
+            title={search ? "No models match that" : "No models in this lane"}
             description={
               search
-                ? "Try a different search term"
-                : "No models available in this category"
+                ? "Try part of the provider or model name, like 'gemini' or 'mini'."
+                : "The gateway has not cached any models here yet. Check back after the next refresh."
+            }
+            action={
+              search ? (
+                <Button variant="outline" size="sm" onClick={() => setSearch("")}>
+                  Clear search
+                </Button>
+              ) : undefined
             }
           />
         ) : (
-          <div className="grid gap-4">
+          <div className="grid gap-2.5">
             {models.map((model) => (
-              <ModelCard
+              <ModelRow
                 key={model.model_id}
                 model={model}
+                accentScope={accent.scope}
                 isSelected={model.model_id === selectedModelId}
                 onSelect={() => handleSelectModel(model.model_id)}
-                isLoading={isMutating}
-                type={activeTab as "free" | "paid" | "image"}
+                isBusy={isMutating}
               />
             ))}
           </div>
@@ -269,111 +264,104 @@ export default function ModelsPage() {
   );
 }
 
-interface ModelCardProps {
-  model: ModelInfo;
-  isSelected: boolean;
-  onSelect: () => void;
-  isLoading: boolean;
-  type: "free" | "paid" | "image";
-}
-
-function ModelCard({
+function ModelRow({
   model,
+  accentScope,
   isSelected,
   onSelect,
-  isLoading,
-  type,
-}: ModelCardProps) {
+  isBusy,
+}: {
+  model: ModelInfo;
+  accentScope: string;
+  isSelected: boolean;
+  onSelect: () => void;
+  isBusy: boolean;
+}) {
   const shortName = model.model_id.split("/").pop() || model.model_id;
+  const vendor = model.model_id.includes("/") ? model.model_id.split("/")[0] : null;
+  const prompt = model.pricing ? parseFloat(model.pricing.prompt) * 1_000_000 : null;
+  const completion = model.pricing
+    ? parseFloat(model.pricing.completion) * 1_000_000
+    : null;
 
   return (
-    <Card hover className={isSelected ? "ring-2 ring-primary-500" : ""}>
-      <CardContent className="py-4">
-        <div className="flex items-start gap-4">
-          <div
-            className={`p-2.5 rounded-lg ${
-              type === "free"
-                ? "bg-green-100 dark:bg-green-900/30"
-                : type === "paid"
-                  ? "bg-purple-100 dark:bg-purple-900/30"
-                  : "bg-amber-100 dark:bg-amber-900/30"
-            }`}
-          >
-            {type === "image" ? (
-              <Image
-                className="h-5 w-5 text-amber-600 dark:text-amber-400"
-              />
-            ) : (
-              <Brain
-                className={`h-5 w-5 ${
-                  type === "free"
-                    ? "text-green-600 dark:text-green-400"
-                    : "text-purple-600 dark:text-purple-400"
-                }`}
-              />
+    <Card
+      rail={isSelected}
+      className={cn(
+        accentScope,
+        "px-4 py-3.5 transition-colors duration-200 ease-swift",
+        isSelected ? "accent-border accent-tint" : "hover:border-line-strong"
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-base font-semibold text-ink">
+              {model.model_name || shortName}
+            </h3>
+            {model.rank != null && model.rank <= 3 && (
+              <Badge variant="outline">#{model.rank}</Badge>
+            )}
+            {model.is_curated && (
+              <Badge variant="accent" dot>
+                <Star className="h-3 w-3" aria-hidden />
+                Curated
+              </Badge>
+            )}
+            {isSelected && (
+              <Badge variant="accent" dot>
+                In use
+              </Badge>
             )}
           </div>
-
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="font-medium text-gray-900 dark:text-gray-100">
-                {model.model_name || shortName}
-              </h3>
-              {isSelected && (
-                <Badge variant="success">
-                  <Check className="h-3 w-3 mr-1" />
-                  Active
-                </Badge>
-              )}
-              {model.is_curated && (
-                <Badge variant="info" title="Preferred model for this tier">
-                  <Star className="h-3 w-3 mr-1" />
-                  Curated
-                </Badge>
-              )}
-            </div>
-
-            <p className="text-sm text-gray-500 dark:text-gray-400 font-mono truncate mt-0.5">
-              {model.model_id}
-            </p>
-
-            <div className="flex flex-wrap gap-4 mt-2 text-xs text-gray-500 dark:text-gray-400">
-              <span>Context: {formatNumber(model.context_length)}</span>
-              {model.pricing && (
-                <>
-                  <span>
-                    Input: {formatCurrency(parseFloat(model.pricing.prompt) * 1000000, 2)}/M
-                  </span>
-                  <span>
-                    Output:{" "}
-                    {formatCurrency(parseFloat(model.pricing.completion) * 1000000, 2)}/M
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-
-          <Button
-            variant={isSelected ? "secondary" : "primary"}
-            size="sm"
-            onClick={onSelect}
-            disabled={isSelected || isLoading}
-            isLoading={isLoading && !isSelected}
-          >
-            {isSelected ? (
-              <>
-                <Check className="h-4 w-4 mr-1" />
-                Selected
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-4 w-4 mr-1" />
-                Select
-              </>
-            )}
-          </Button>
+          <p className="mt-0.5 truncate font-mono text-xs text-subtle">
+            {vendor && <span className="text-muted">{vendor}/</span>}
+            {shortName}
+          </p>
         </div>
-      </CardContent>
+
+        <dl className="metric flex items-center gap-5 text-xs">
+          <div>
+            <dt className="text-subtle">Context</dt>
+            <dd className="mt-0.5 font-medium text-ink">
+              {formatNumber(model.context_length)}
+            </dd>
+          </div>
+          {prompt != null && completion != null && (
+            <>
+              <div>
+                <dt className="text-subtle">In / M</dt>
+                <dd className="mt-0.5 font-medium text-ink">
+                  {formatCurrency(prompt, 2)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-subtle">Out / M</dt>
+                <dd className="mt-0.5 font-medium text-ink">
+                  {formatCurrency(completion, 2)}
+                </dd>
+              </div>
+            </>
+          )}
+        </dl>
+
+        <Button
+          variant={isSelected ? "secondary" : "outline"}
+          size="sm"
+          onClick={onSelect}
+          disabled={isSelected || isBusy}
+          isLoading={isBusy && !isSelected}
+        >
+          {isSelected ? (
+            <>
+              <Check className="h-3.5 w-3.5" aria-hidden />
+              Selected
+            </>
+          ) : (
+            "Use this"
+          )}
+        </Button>
+      </div>
     </Card>
   );
 }

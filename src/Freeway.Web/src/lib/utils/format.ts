@@ -55,3 +55,32 @@ export function getModelShortName(modelId: string | undefined | null): string {
   const parts = modelId.split("/");
   return parts.length > 1 ? parts[parts.length - 1] : modelId;
 }
+
+/** ISO timestamp for midnight on the 1st of the current month, UTC. */
+export function startOfMonthIso(): string {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+}
+
+/** ISO timestamp for N days ago, UTC. */
+export function daysAgoIso(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString();
+}
+
+/** "September 2026" — used to label the current billing period. */
+export function currentMonthLabel(): string {
+  return new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+/**
+ * Money that can span six orders of magnitude between tiers. Keeps small
+ * amounts legible without printing "$0.00" for a real charge.
+ */
+export function formatSpend(amount: number | undefined | null): string {
+  if (amount == null || amount === 0) return "$0.00";
+  if (amount < 0.01) return `$${amount.toFixed(6)}`;
+  if (amount < 1) return `$${amount.toFixed(4)}`;
+  return `$${amount.toFixed(2)}`;
+}

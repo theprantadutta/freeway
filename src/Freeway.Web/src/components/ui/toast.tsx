@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, ReactNode, useCallback } from "react";
-import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from "lucide-react";
+import { X, CheckCircle2, AlertCircle, Info, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 type ToastType = "success" | "error" | "info" | "warning";
@@ -22,10 +22,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const addToast = useCallback((message: string, type: ToastType = "info") => {
-    const id = Math.random().toString(36).substr(2, 9);
+    const id = Math.random().toString(36).slice(2, 11);
     setToasts((prev) => [...prev, { id, message, type }]);
-
-    // Auto remove after 5 seconds
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 5000);
@@ -38,7 +36,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast: addToast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+      <div
+        className="pointer-events-none fixed inset-x-4 bottom-20 z-[60] flex flex-col items-center gap-2 sm:inset-x-auto sm:bottom-5 sm:right-5 sm:items-end"
+        role="region"
+        aria-live="polite"
+      >
         {toasts.map((toast) => (
           <ToastItem
             key={toast.id}
@@ -53,17 +55,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   const icons = {
-    success: CheckCircle,
+    success: CheckCircle2,
     error: AlertCircle,
     info: Info,
     warning: AlertTriangle,
   };
 
-  const styles = {
-    success: "bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200",
-    error: "bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200",
-    info: "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200",
-    warning: "bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-200",
+  // The icon carries the colour; the surface stays neutral so stacked
+  // toasts do not turn into a wall of tinted blocks.
+  const iconTone = {
+    success: "text-ok",
+    error: "text-danger",
+    info: "text-info",
+    warning: "text-warn",
   };
 
   const Icon = icons[toast.type];
@@ -71,17 +75,18 @@ function ToastItem({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   return (
     <div
       className={cn(
-        "flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg animate-fade-in min-w-[300px] max-w-md",
-        styles[toast.type]
+        "pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-panel border border-line",
+        "bg-panel px-4 py-3 shadow-pop animate-slide-over"
       )}
     >
-      <Icon className="h-5 w-5 flex-shrink-0" />
-      <p className="flex-1 text-sm font-medium">{toast.message}</p>
+      <Icon className={cn("mt-px h-4 w-4 shrink-0", iconTone[toast.type])} aria-hidden />
+      <p className="flex-1 text-sm text-ink">{toast.message}</p>
       <button
         onClick={onClose}
-        className="p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+        aria-label="Dismiss"
+        className="-mr-1 grid h-5 w-5 shrink-0 place-items-center rounded text-subtle transition-colors hover:text-ink"
       >
-        <X className="h-4 w-4" />
+        <X className="h-3.5 w-3.5" />
       </button>
     </div>
   );

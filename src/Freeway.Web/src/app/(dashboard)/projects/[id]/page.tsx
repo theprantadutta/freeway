@@ -1,113 +1,125 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import {
   ArrowLeft,
   FolderKanban,
-  Key,
-  Gauge,
-  Calendar,
   Activity,
   Zap,
   DollarSign,
   Clock,
-  AlertCircle,
+  CircleAlert,
   ChevronDown,
-  ChevronUp,
   Copy,
   Check,
+  Coins,
 } from "lucide-react";
-import Link from "next/link";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-} from "recharts";
 import { Header } from "@/components/layout/header";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { StatCard } from "@/components/ui/stat-card";
-import { Skeleton, SkeletonCard } from "@/components/ui/skeleton";
-import { EmptyState } from "@/components/ui/empty-state";
+import { Stat, StatStrip } from "@/components/ui/stat-card";
+import { Skeleton, SkeletonStrip, SkeletonList } from "@/components/ui/skeleton";
+import { EmptyState, ErrorState } from "@/components/ui/empty-state";
 import { projectsApi } from "@/lib/api/projects";
 import { analyticsApi } from "@/lib/api/analytics";
 import {
   formatNumber,
-  formatCurrency,
+  formatSpend,
   formatDateTime,
   formatRelativeTime,
   getModelShortName,
+  startOfMonthIso,
+  daysAgoIso,
+  currentMonthLabel,
 } from "@/lib/utils/format";
-import type { UsageLog } from "@/lib/types";
+import { cn } from "@/lib/utils/cn";
+import { ACCENTS, accentForUsage, usageLabel, type AccentKey } from "@/lib/theme/accents";
+import type { ModelUsageStats, UsageLog } from "@/lib/types";
 
-const CHART_COLORS = [
-  "#0ea5e9",
-  "#8b5cf6",
-  "#10b981",
-  "#f59e0b",
-  "#ef4444",
-  "#ec4899",
-  "#6366f1",
-  "#14b8a6",
+type Period = "month" | "7d" | "all";
+
+const PERIODS: { key: Period; label: string; range: () => string | undefined }[] = [
+  { key: "month", label: "This month", range: () => startOfMonthIso() },
+  { key: "7d", label: "Last 7 days", range: () => daysAgoIso(7) },
+  { key: "all", label: "All time", range: () => undefined },
 ];
 
 export default function ProjectDetailsPage() {
   const params = useParams();
   const projectId = params.id as string;
 
+  const [period, setPeriod] = useState<Period>("month");
   const [logsLimit, setLogsLimit] = useState(20);
 
-  const { data: project, isLoading: projectLoading } = useQuery({
+  const startDate = PERIODS.find((p) => p.key === period)!.range();
+
+  const projectQuery = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => projectsApi.getProject(projectId),
   });
 
-  const { data: usage, isLoading: usageLoading } = useQuery({
-    queryKey: ["project-usage", projectId],
+  const usageQuery = useQuery({
+    queryKey: ["project-usage", projectId, period],
+    queryFn: () => analyticsApi.getProjectUsage(projectId, startDate),
+  });
+
+  // Kept separate from the period so lifetime spend is always on screen.
+  const lifetimeQuery = useQuery({
+    queryKey: ["project-usage", projectId, "all"],
     queryFn: () => analyticsApi.getProjectUsage(projectId),
   });
 
-  const { data: logsData, isLoading: logsLoading } = useQuery({
+  const monthQuery = useQuery({
+    queryKey: ["project-usage", projectId, "month"],
+    queryFn: () => analyticsApi.getProjectUsage(projectId, startOfMonthIso()),
+  });
+
+  const logsQuery = useQuery({
     queryKey: ["project-logs", projectId, logsLimit],
     queryFn: () =>
       analyticsApi.getUsageLogs(projectId, { limit: logsLimit, offset: 0 }),
   });
 
-  if (projectLoading) {
+  const project = projectQuery.data;
+  const summary = usageQuery.data?.summary;
+  const byModel = useMemo(
+    () => [...(usageQuery.data?.by_model ?? [])].sort((a, b) => b.requests - a.requests),
+    [usageQuery.data]
+  );
+  const logs = logsQuery.data?.logs || [];
+  const totalLogs = logsQuery.data?.total_count || 0;
+
+  if (projectQuery.isLoading) {
     return (
-      <div className="flex flex-col h-full">
-        <Header title="Loading..." />
-        <div className="p-6 space-y-6">
-          <SkeletonCard />
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[...Array(8)].map((_, i) => (
-              <Skeleton key={i} className="h-24" />
-            ))}
-          </div>
+      <div className="flex h-full flex-col">
+        <Header title="Loading project" />
+        <div className="space-y-6 p-4 md:p-6">
+          <SkeletonStrip />
+          <SkeletonList count={2} />
         </div>
       </div>
     );
   }
 
-  if (!project) {
+  if (projectQuery.isError || !project) {
     return (
-      <div className="flex flex-col h-full">
-        <Header title="Project Not Found" />
-        <div className="flex-1 flex items-center justify-center">
+      <div className="flex h-full flex-col">
+        <Header title="Project not found" />
+        <div className="flex-1 p-4 md:p-6">
           <EmptyState
+            className="accent-brand"
             icon={FolderKanban}
-            title="Project not found"
-            description="The project you're looking for doesn't exist."
+            title="That project is not here"
+            description="It may have been deleted, or the link may be wrong."
             action={
               <Link href="/projects">
                 <Button variant="outline">
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Back to Projects
+                  <ArrowLeft className="h-4 w-4" aria-hidden />
+                  Back to projects
                 </Button>
               </Link>
             }
@@ -117,454 +129,473 @@ export default function ProjectDetailsPage() {
     );
   }
 
-  const summary = usage?.summary;
-  const byModel = usage?.by_model || [];
-  const logs = logsData?.logs || [];
-  const totalLogs = logsData?.total_count || 0;
-
   return (
-    <div className="flex flex-col h-full">
-      <Header title={project.name} subtitle="Project details and analytics" />
+    <div className="flex h-full flex-col">
+      <Header
+        title={project.name}
+        subtitle={`Key ${project.api_key_prefix}… · ${project.rate_limit_per_minute} requests/min`}
+        actions={
+          <Badge variant={project.is_active ? "success" : "default"} size="md" dot>
+            {project.is_active ? "Active" : "Paused"}
+          </Badge>
+        }
+      />
 
-      <div className="flex-1 p-4 md:p-6 space-y-6 overflow-y-auto">
-        {/* Back Link */}
+      <div className="flex-1 space-y-6 p-4 md:p-6">
         <Link
           href="/projects"
-          className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="inline-flex items-center gap-1.5 rounded-control text-sm text-muted transition-colors hover:text-ink"
         >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Projects
+          <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+          All projects
         </Link>
 
-        {/* Project Info */}
-        <Card>
-          <CardContent className="py-6">
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
-                <FolderKanban className="h-6 w-6 text-primary-600 dark:text-primary-400" />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                    {project.name}
-                  </h2>
-                  <Badge variant={project.is_active ? "success" : "default"}>
-                    {project.is_active ? "Active" : "Inactive"}
-                  </Badge>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <p className="text-gray-500 dark:text-gray-400">
-                      Project ID
-                    </p>
-                    <p className="font-mono text-gray-900 dark:text-gray-100 text-xs mt-1 break-all">
-                      {project.id}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500 dark:text-gray-400">
-                      API Key Prefix
-                    </p>
-                    <p className="font-mono text-gray-900 dark:text-gray-100 mt-1">
-                      {project.api_key_prefix}...
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500 dark:text-gray-400">
-                      Rate Limit
-                    </p>
-                    <p className="text-gray-900 dark:text-gray-100 mt-1">
-                      {project.rate_limit_per_minute} req/min
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-500 dark:text-gray-400">Created</p>
-                    <p className="text-gray-900 dark:text-gray-100 mt-1">
-                      {formatDateTime(project.created_at)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <SpendPanel
+          monthCost={monthQuery.data?.summary?.total_cost_usd}
+          lifetimeCost={lifetimeQuery.data?.summary?.total_cost_usd}
+          monthRequests={monthQuery.data?.summary?.total_requests}
+          lifetimeRequests={lifetimeQuery.data?.summary?.total_requests}
+          isLoading={monthQuery.isLoading || lifetimeQuery.isLoading}
+        />
 
-        {/* Usage Stats */}
-        <section>
-          <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">
-            Usage Statistics
-          </h3>
-          {usageLoading ? (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[...Array(8)].map((_, i) => (
-                <Skeleton key={i} className="h-24" />
+        <section aria-labelledby="usage-heading" className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2
+                id="usage-heading"
+                className="text-base font-semibold tracking-tight text-ink"
+              >
+                Usage
+              </h2>
+              <p className="text-sm text-muted">
+                {PERIODS.find((p) => p.key === period)!.label.toLowerCase()}
+              </p>
+            </div>
+            <div
+              role="tablist"
+              aria-label="Time period"
+              className="flex items-center gap-0.5 rounded-control bg-inset p-0.5"
+            >
+              {PERIODS.map((p) => (
+                <button
+                  key={p.key}
+                  role="tab"
+                  aria-selected={period === p.key}
+                  onClick={() => setPeriod(p.key)}
+                  className={cn(
+                    "rounded-[0.3125rem] px-3 py-1.5 text-sm font-medium transition-colors duration-150 ease-swift",
+                    period === p.key
+                      ? "bg-panel text-ink shadow-pop"
+                      : "text-muted hover:text-ink"
+                  )}
+                >
+                  {p.label}
+                </button>
               ))}
             </div>
-          ) : summary ? (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard
-                title="Total Requests"
+          </div>
+
+          {usageQuery.isLoading ? (
+            <SkeletonStrip />
+          ) : usageQuery.isError ? (
+            <ErrorState
+              title="Could not load usage"
+              onRetry={() => usageQuery.refetch()}
+            />
+          ) : summary && summary.total_requests > 0 ? (
+            <StatStrip className="stagger">
+              <Stat
+                label="Requests"
                 value={formatNumber(summary.total_requests)}
                 icon={Zap}
-                iconColor="text-blue-500"
+                accent={ACCENTS.low.scope}
+                note={`${formatNumber(summary.failed_requests)} failed`}
               />
-              <StatCard
-                title="Success Rate"
+              <Stat
+                label="Success rate"
                 value={`${(summary.success_rate ?? 0).toFixed(1)}%`}
                 icon={Activity}
-                iconColor="text-green-500"
+                accent={ACCENTS.free.scope}
               />
-              <StatCard
-                title="Total Tokens"
+              <Stat
+                label="Tokens"
                 value={formatNumber(summary.total_tokens)}
-                icon={Key}
-                iconColor="text-amber-500"
+                icon={Coins}
+                accent={ACCENTS.moderate.scope}
+                note={`${formatNumber(summary.total_input_tokens)} in / ${formatNumber(summary.total_output_tokens)} out`}
               />
-              <StatCard
-                title="Total Cost"
-                value={formatCurrency(summary.total_cost_usd, 6)}
-                icon={DollarSign}
-                iconColor="text-purple-500"
-              />
-              <StatCard
-                title="Input Tokens"
-                value={formatNumber(summary.total_input_tokens)}
-                icon={Gauge}
-                iconColor="text-blue-500"
-              />
-              <StatCard
-                title="Output Tokens"
-                value={formatNumber(summary.total_output_tokens)}
-                icon={Gauge}
-                iconColor="text-indigo-500"
-              />
-              <StatCard
-                title="Avg Response"
+              <Stat
+                label="Avg response"
                 value={`${(summary.avg_response_time_ms ?? 0).toFixed(0)}ms`}
                 icon={Clock}
-                iconColor="text-amber-500"
+                accent={ACCENTS.image.scope}
               />
-              <StatCard
-                title="Failed Requests"
-                value={formatNumber(summary.failed_requests)}
-                icon={AlertCircle}
-                iconColor="text-red-500"
-              />
-            </div>
+            </StatStrip>
           ) : (
             <EmptyState
+              className="accent-brand"
               icon={Activity}
-              title="No usage data"
-              description="Usage statistics will appear here once this project receives traffic."
+              title="No traffic in this period"
+              description="Send a request with this project's API key and it will show up here."
             />
           )}
         </section>
 
-        {/* Usage by Model */}
         {byModel.length > 0 && (
-          <section>
-            <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">
-              Usage by Model
-            </h3>
-            <div className="grid lg:grid-cols-2 gap-4">
-              {/* Pie Chart */}
-              <Card>
-                <CardContent className="py-6">
-                  <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={byModel}
-                          dataKey="requests"
-                          nameKey="model_id"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={80}
-                          label={({ percent }) =>
-                            percent > 0.05
-                              ? `${(percent * 100).toFixed(0)}%`
-                              : ""
-                          }
-                        >
-                          {byModel.map((_, index) => (
-                            <Cell
-                              key={`cell-${index}`}
-                              fill={CHART_COLORS[index % CHART_COLORS.length]}
-                            />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          formatter={(value: number) => [value, "Requests"]}
-                          labelFormatter={(label) => getModelShortName(label)}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="mt-4 space-y-2">
-                    {byModel.slice(0, 5).map((model, index) => (
-                      <div
-                        key={model.model_id}
-                        className="flex items-center gap-2"
-                      >
-                        <div
-                          className="w-3 h-3 rounded"
-                          style={{
-                            backgroundColor:
-                              CHART_COLORS[index % CHART_COLORS.length],
-                          }}
-                        />
-                        <span className="flex-1 text-sm text-gray-600 dark:text-gray-400 truncate">
-                          {getModelShortName(model.model_id)}
-                        </span>
-                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                          {formatNumber(model.requests)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Table */}
-              <Card>
-                <CardContent className="py-0">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-gray-200 dark:border-gray-800">
-                          <th className="py-3 px-2 text-left font-medium text-gray-500 dark:text-gray-400">
-                            Model
-                          </th>
-                          <th className="py-3 px-2 text-left font-medium text-gray-500 dark:text-gray-400">
-                            Type
-                          </th>
-                          <th className="py-3 px-2 text-right font-medium text-gray-500 dark:text-gray-400">
-                            Requests
-                          </th>
-                          <th className="py-3 px-2 text-right font-medium text-gray-500 dark:text-gray-400">
-                            Tokens
-                          </th>
-                          <th className="py-3 px-2 text-right font-medium text-gray-500 dark:text-gray-400">
-                            Cost
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {byModel.map((model) => (
-                          <tr
-                            key={model.model_id}
-                            className="border-b border-gray-100 dark:border-gray-800/50"
-                          >
-                            <td className="py-3 px-2 font-mono text-gray-900 dark:text-gray-100">
-                              {getModelShortName(model.model_id)}
-                            </td>
-                            <td className="py-3 px-2">
-                              <Badge
-                                variant={
-                                  model.model_type === "free"
-                                    ? "success"
-                                    : "primary"
-                                }
-                                size="sm"
-                              >
-                                {model.model_type}
-                              </Badge>
-                              {model.model_tier && (
-                                <Badge variant="info" size="sm" className="ml-1">
-                                  {model.model_tier}
-                                </Badge>
-                              )}
-                            </td>
-                            <td className="py-3 px-2 text-right text-gray-900 dark:text-gray-100">
-                              {formatNumber(model.requests)}
-                            </td>
-                            <td className="py-3 px-2 text-right text-gray-900 dark:text-gray-100">
-                              {formatNumber(model.tokens)}
-                            </td>
-                            <td className="py-3 px-2 text-right text-gray-900 dark:text-gray-100">
-                              {formatCurrency(model.cost_usd, 6)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </section>
+          <ModelBreakdown models={byModel} />
         )}
 
-        {/* Recent Logs */}
-        <section>
-          <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-4">
-            Recent Requests ({totalLogs} total)
-          </h3>
-          {logsLoading ? (
-            <div className="space-y-3">
-              {[...Array(3)].map((_, i) => (
-                <Skeleton key={i} className="h-20" />
-              ))}
-            </div>
+        <section aria-labelledby="logs-heading" className="space-y-3">
+          <div>
+            <h2
+              id="logs-heading"
+              className="text-base font-semibold tracking-tight text-ink"
+            >
+              Recent requests
+            </h2>
+            <p className="text-sm text-muted">
+              {formatNumber(totalLogs)} logged for this project
+            </p>
+          </div>
+
+          {logsQuery.isLoading ? (
+            <SkeletonList count={3} />
+          ) : logsQuery.isError ? (
+            <ErrorState
+              title="Could not load request logs"
+              onRetry={() => logsQuery.refetch()}
+            />
           ) : logs.length === 0 ? (
             <EmptyState
+              className="accent-brand"
               icon={Activity}
-              title="No requests yet"
-              description="Requests will appear here once this project starts receiving traffic."
+              title="No requests logged yet"
+              description="Every call through this key gets recorded here with its model, tokens and cost."
             />
           ) : (
             <>
-              <div className="space-y-3">
+              <div className="grid gap-2">
                 {logs.map((log) => (
-                  <LogCard key={log.id} log={log} />
+                  <LogRow key={log.id} log={log} />
                 ))}
               </div>
               {totalLogs > logsLimit && (
-                <div className="mt-4 text-center">
-                  <Button
-                    variant="outline"
-                    onClick={() => setLogsLimit(logsLimit + 20)}
-                  >
-                    Load More
+                <div className="flex justify-center pt-1">
+                  <Button variant="outline" onClick={() => setLogsLimit(logsLimit + 20)}>
+                    Show 20 more
                   </Button>
                 </div>
               )}
             </>
           )}
         </section>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Project details</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <dt className="text-xs text-subtle">Project ID</dt>
+                <dd className="mt-1 break-all font-mono text-xs text-ink">{project.id}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-subtle">API key</dt>
+                <dd className="mt-1 font-mono text-sm text-ink">
+                  {project.api_key_prefix}…
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-subtle">Rate limit</dt>
+                <dd className="tnum mt-1 text-sm text-ink">
+                  {project.rate_limit_per_minute} req/min
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-subtle">Created</dt>
+                <dd className="mt-1 text-sm text-ink">
+                  {formatDateTime(project.created_at)}
+                </dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
 }
 
-function LogCard({ log }: { log: UsageLog }) {
+/** Lifetime and month-to-date spend side by side, since one without the other misleads. */
+function SpendPanel({
+  monthCost,
+  lifetimeCost,
+  monthRequests,
+  lifetimeRequests,
+  isLoading,
+}: {
+  monthCost?: number;
+  lifetimeCost?: number;
+  monthRequests?: number;
+  lifetimeRequests?: number;
+  isLoading: boolean;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="grid sm:grid-cols-2 sm:divide-x divide-y sm:divide-y-0 divide-line">
+        <div className="accent-premium accent-wash p-5">
+          <div className="flex items-center gap-2">
+            <span className="grid h-6 w-6 place-items-center rounded-[0.3125rem] accent-tint accent-text">
+              <DollarSign className="h-3.5 w-3.5" aria-hidden />
+            </span>
+            <p className="text-sm text-muted">Spent in {currentMonthLabel()}</p>
+          </div>
+          {isLoading ? (
+            <Skeleton className="mt-2 h-9 w-32" />
+          ) : (
+            <>
+              <p className="metric mt-2 text-3xl font-semibold text-ink">
+                {formatSpend(monthCost)}
+              </p>
+              <p className="mt-1 text-xs text-subtle">
+                {formatNumber(monthRequests ?? 0)} requests this month
+              </p>
+            </>
+          )}
+        </div>
+
+        <div className="accent-brand p-5">
+          <div className="flex items-center gap-2">
+            <span className="grid h-6 w-6 place-items-center rounded-[0.3125rem] accent-tint accent-text">
+              <Coins className="h-3.5 w-3.5" aria-hidden />
+            </span>
+            <p className="text-sm text-muted">Spent all time</p>
+          </div>
+          {isLoading ? (
+            <Skeleton className="mt-2 h-9 w-32" />
+          ) : (
+            <>
+              <p className="metric mt-2 text-3xl font-semibold text-ink">
+                {formatSpend(lifetimeCost)}
+              </p>
+              <p className="mt-1 text-xs text-subtle">
+                {formatNumber(lifetimeRequests ?? 0)} requests since the project was created
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Ranked bars beat a pie here: the job is comparing magnitudes across models,
+ * and a pie with eight slices cannot be read. Colour encodes the model's type,
+ * matching the lanes everywhere else, and each bar is directly labelled so the
+ * hue is never the only thing carrying identity.
+ */
+function ModelBreakdown({ models }: { models: ModelUsageStats[] }) {
+  const max = Math.max(...models.map((m) => m.requests), 1);
+  const totalRequests = models.reduce((sum, m) => sum + m.requests, 0);
+
+  const typesPresent = Array.from(
+    new Set(models.map((m) => accentForUsage(m.model_type, m.model_tier)))
+  );
+
+  return (
+    <section aria-labelledby="models-heading" className="space-y-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2
+            id="models-heading"
+            className="text-base font-semibold tracking-tight text-ink"
+          >
+            Where the requests went
+          </h2>
+          <p className="text-sm text-muted">
+            {models.length} {models.length === 1 ? "model" : "models"} used
+          </p>
+        </div>
+        <ul className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          {typesPresent.map((key) => (
+            <li key={key} className={cn(ACCENTS[key].scope, "flex items-center gap-1.5")}>
+              <span className="h-2 w-2 rounded-full mark-bg" aria-hidden />
+              <span className="text-xs text-muted">{ACCENTS[key].label}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <Card>
+        <CardContent className="space-y-3.5">
+          {models.map((model) => {
+            const key = accentForUsage(model.model_type, model.model_tier);
+            const share = totalRequests ? (model.requests / totalRequests) * 100 : 0;
+            return (
+              <div key={`${model.model_id}-${model.model_tier ?? ""}`} className={ACCENTS[key].scope}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="truncate text-sm font-medium text-ink">
+                    {getModelShortName(model.model_id)}
+                  </span>
+                  <span className="metric shrink-0 text-sm text-muted">
+                    {formatNumber(model.requests)}
+                    <span className="ml-1.5 text-subtle">{share.toFixed(0)}%</span>
+                  </span>
+                </div>
+                <div
+                  className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-inset"
+                  role="img"
+                  aria-label={`${getModelShortName(model.model_id)}: ${model.requests} requests, ${share.toFixed(0)} percent`}
+                >
+                  <div
+                    className="h-full rounded-full mark-bg transition-[width] duration-500 ease-swift"
+                    style={{ width: `${Math.max((model.requests / max) * 100, 2)}%` }}
+                  />
+                </div>
+                <div className="mt-1 flex items-center gap-2 text-xs text-subtle">
+                  <Badge variant="accent">{usageLabel(model.model_type, model.model_tier)}</Badge>
+                  <span className="tnum">{formatNumber(model.tokens)} tokens</span>
+                  <span aria-hidden>·</span>
+                  <span className="tnum">{formatSpend(model.cost_usd)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+function LogRow({ log }: { log: UsageLog }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const accentKey: AccentKey = accentForUsage(log.model_type, log.model_tier);
 
-  const handleCopyResponse = () => {
-    if (log.response_content) {
-      navigator.clipboard.writeText(log.response_content);
+  const handleCopyResponse = async () => {
+    if (!log.response_content) return;
+    try {
+      await navigator.clipboard.writeText(log.response_content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
     }
   };
 
   return (
-    <Card>
-      <CardContent className="py-3">
-        <div
-          className="flex items-center gap-3 cursor-pointer"
-          onClick={() => setExpanded(!expanded)}
+    <Card rail className={cn(ACCENTS[accentKey].scope, "overflow-hidden")}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-inset/60"
+      >
+        <span
+          className={cn(
+            "grid h-7 w-7 shrink-0 place-items-center rounded-control",
+            log.success ? "bg-ok/12 text-ok" : "bg-danger/12 text-danger"
+          )}
         >
-          <div
-            className={`p-2 rounded-lg ${
-              log.success
-                ? "bg-green-100 dark:bg-green-900/30"
-                : "bg-red-100 dark:bg-red-900/30"
-            }`}
-          >
-            {log.success ? (
-              <Activity className="h-4 w-4 text-green-600 dark:text-green-400" />
-            ) : (
-              <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
-            )}
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-gray-900 dark:text-gray-100">
-                {getModelShortName(log.model_id)}
-              </span>
-              <Badge
-                variant={log.model_type === "free" ? "success" : "primary"}
-                size="sm"
-              >
-                {log.model_type}
-              </Badge>
-              {log.model_tier && (
-                <Badge variant="info" size="sm">
-                  {log.model_tier}
-                </Badge>
-              )}
-            </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              {formatRelativeTime(log.created_at)} • {log.total_tokens} tokens
-              • {log.response_time_ms}ms
-            </p>
-          </div>
-
-          {expanded ? (
-            <ChevronUp className="h-4 w-4 text-gray-400" />
+          {log.success ? (
+            <Activity className="h-3.5 w-3.5" aria-hidden />
           ) : (
-            <ChevronDown className="h-4 w-4 text-gray-400" />
+            <CircleAlert className="h-3.5 w-3.5" aria-hidden />
+          )}
+        </span>
+
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-medium text-ink">
+              {getModelShortName(log.model_id)}
+            </span>
+            <Badge variant="accent">{usageLabel(log.model_type, log.model_tier)}</Badge>
+            {!log.success && <Badge variant="error">Failed</Badge>}
+          </span>
+          <span className="mt-0.5 flex flex-wrap items-center gap-x-3 text-xs text-subtle">
+            <span>{formatRelativeTime(log.created_at)}</span>
+            <span className="tnum">{formatNumber(log.total_tokens)} tokens</span>
+            <span className="tnum">{log.response_time_ms}ms</span>
+            <span className="tnum">{formatSpend(log.cost_usd)}</span>
+          </span>
+        </span>
+
+        <ChevronDown
+          className={cn(
+            "h-4 w-4 shrink-0 text-subtle transition-transform duration-200 ease-swift",
+            expanded && "rotate-180"
+          )}
+          aria-hidden
+        />
+      </button>
+
+      {expanded && (
+        <div className="space-y-4 border-t border-line px-4 py-4 animate-rise-in">
+          <dl className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <div>
+              <dt className="text-xs text-subtle">Request ID</dt>
+              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
+                {log.request_id || "—"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-subtle">Input tokens</dt>
+              <dd className="tnum mt-0.5 text-sm text-ink">
+                {formatNumber(log.input_tokens)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-subtle">Output tokens</dt>
+              <dd className="tnum mt-0.5 text-sm text-ink">
+                {formatNumber(log.output_tokens)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-subtle">Cost</dt>
+              <dd className="tnum mt-0.5 text-sm text-ink">{formatSpend(log.cost_usd)}</dd>
+            </div>
+          </dl>
+
+          {log.error_message && (
+            <div className="rounded-control border border-danger/30 bg-danger/[0.06] px-3.5 py-3">
+              <p className="text-sm text-danger">{log.error_message}</p>
+            </div>
+          )}
+
+          {log.response_content && (
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-medium text-muted">Response</p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleCopyResponse}
+                  aria-label={copied ? "Copied" : "Copy response"}
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-ok" aria-hidden />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" aria-hidden />
+                      Copy
+                    </>
+                  )}
+                </Button>
+              </div>
+              <div className="max-h-44 overflow-y-auto rounded-control border border-line bg-inset px-3.5 py-3">
+                <p className="whitespace-pre-wrap text-sm text-muted">
+                  {log.response_content.length > 500
+                    ? `${log.response_content.slice(0, 500)}…`
+                    : log.response_content}
+                </p>
+              </div>
+            </div>
           )}
         </div>
-
-        {expanded && (
-          <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 space-y-3">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <p className="text-gray-500 dark:text-gray-400">Request ID</p>
-                <p className="font-mono text-gray-900 dark:text-gray-100 text-xs mt-1">
-                  {log.request_id || "N/A"}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-500 dark:text-gray-400">Input Tokens</p>
-                <p className="text-gray-900 dark:text-gray-100 mt-1">
-                  {formatNumber(log.input_tokens)}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-500 dark:text-gray-400">
-                  Output Tokens
-                </p>
-                <p className="text-gray-900 dark:text-gray-100 mt-1">
-                  {formatNumber(log.output_tokens)}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-500 dark:text-gray-400">Cost</p>
-                <p className="text-gray-900 dark:text-gray-100 mt-1">
-                  {formatCurrency(log.cost_usd, 8)}
-                </p>
-              </div>
-            </div>
-
-            {log.error_message && (
-              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                <p className="text-sm text-red-700 dark:text-red-300">
-                  {log.error_message}
-                </p>
-              </div>
-            )}
-
-            {log.response_content && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                    Response Preview
-                  </p>
-                  <Button variant="ghost" size="sm" onClick={handleCopyResponse}>
-                    {copied ? (
-                      <Check className="h-3 w-3" />
-                    ) : (
-                      <Copy className="h-3 w-3" />
-                    )}
-                  </Button>
-                </div>
-                <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg max-h-40 overflow-y-auto">
-                  <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                    {log.response_content.length > 500
-                      ? `${log.response_content.substring(0, 500)}...`
-                      : log.response_content}
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
+      )}
     </Card>
   );
 }
