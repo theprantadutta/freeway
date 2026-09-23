@@ -190,10 +190,47 @@ public static class EmailTemplates
                 sb.Append($"<p style='margin:8px 0 0;color:{Subtle};font-size:12px'>and {r.Models.Count - 15} more</p>");
         }
 
+        sb.Append(LocalClaudeBlock(r));
         sb.Append(CostProvenanceBlock(r));
         sb.Append(CreditBlock(r.Credit));
         sb.Append(FootClose(r));
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// What the local Claude subscription absorbed, and what that avoided. Shown
+    /// whenever the route is configured, including when it served nothing, because
+    /// "it handled none this week" is itself the useful signal.
+    /// </summary>
+    private static string LocalClaudeBlock(WeeklyUsageReport r)
+    {
+        if (r.LocalClaudeStatus is null && r.LocalClaudeRequests == 0) return "";
+
+        var body = r.LocalClaudeRequests > 0
+            ? $@"
+    <div style='font-size:13px;color:{Muted}'>Handled by local Claude Code</div>
+    <div style='margin-top:4px;font-size:20px;font-weight:600;color:{Ink}'>
+      {Num(r.LocalClaudeRequests)} request{(r.LocalClaudeRequests == 1 ? "" : "s")} at no charge
+    </div>
+    <div style='margin-top:2px;font-size:12px;color:{Subtle}'>
+      {Money(r.LocalClaudeAvoidedUsd)} of list price avoided
+    </div>"
+            : $@"
+    <div style='font-size:13px;color:{Muted}'>Handled by local Claude Code</div>
+    <div style='margin-top:4px;font-size:20px;font-weight:600;color:{Ink}'>none this week</div>";
+
+        var status = r.LocalClaudeStatus is null
+            ? ""
+            : $"<div style='margin-top:6px;font-size:12px;color:{Subtle}'>Route status: {E(r.LocalClaudeStatus)}</div>";
+
+        return $@"
+{SectionTitle("Local Claude")}
+<table role='presentation' width='100%' cellpadding='0' cellspacing='0'>
+  <tr><td style='padding:14px 16px;background:{Surface};border:1px solid {Line};border-left:3px solid #059669;border-radius:8px'>
+    {body}
+    {status}
+  </td></tr>
+</table>";
     }
 
     /// <summary>
@@ -207,6 +244,7 @@ public static class EmailTemplates
         var labels = new Dictionary<string, string>
         {
             ["provider"] = "billed amount reported by the provider",
+            ["subscription"] = "served by local Claude Code, nothing billed",
             ["free_tier"] = "a provider's own free tier, genuinely zero",
             ["estimated"] = "estimated from a cached price",
             ["backfilled"] = "re-costed later at catalog prices",
@@ -295,6 +333,17 @@ public static class EmailTemplates
             sb.AppendLine("BY MODEL");
             foreach (var m in r.Models.Take(15))
                 sb.AppendLine($"  {m.ModelId,-40} {Num(m.Requests),7} req  {Money(m.CostUsd),12}");
+            sb.AppendLine();
+        }
+
+        if (r.LocalClaudeStatus is not null || r.LocalClaudeRequests > 0)
+        {
+            sb.AppendLine("LOCAL CLAUDE");
+            sb.AppendLine(r.LocalClaudeRequests > 0
+                ? $"  {Num(r.LocalClaudeRequests)} request(s) handled at no charge, {Money(r.LocalClaudeAvoidedUsd)} of list price avoided"
+                : "  none handled this week");
+            if (r.LocalClaudeStatus is not null)
+                sb.AppendLine($"  Route status: {r.LocalClaudeStatus}");
             sb.AppendLine();
         }
 

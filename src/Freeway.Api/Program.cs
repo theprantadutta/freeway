@@ -197,6 +197,26 @@ try
         Log.Information("Weekly usage report disabled");
     }
 
+    // Local Claude health. Hourly by default: often enough that the premium lane
+    // knows the score, rare enough that probing does not itself eat the quota.
+    var localClaudeEnabled =
+        bool.TryParse(Environment.GetEnvironmentVariable("LOCAL_CLAUDE_ENABLED"), out var lce) && lce;
+    var localClaudeCron = Environment.GetEnvironmentVariable("LOCAL_CLAUDE_HEALTH_CRON") ?? Cron.Hourly();
+
+    if (localClaudeEnabled)
+    {
+        RecurringJob.AddOrUpdate<Freeway.Infrastructure.Jobs.ILocalClaudeHealthJob>(
+            "local-claude-health",
+            job => job.CheckAsync(),
+            localClaudeCron);
+        Log.Information("Local Claude health probe scheduled: {Cron}", localClaudeCron);
+    }
+    else
+    {
+        RecurringJob.RemoveIfExists("local-claude-health");
+        Log.Information("Local Claude is disabled; the premium lane always uses a paid model");
+    }
+
     // Spend and credit alerts. Hourly by default: frequent enough to catch a leaked
     // key the same day, rare enough that the cooldown keeps the inbox quiet.
     var spendAlertsEnabled =

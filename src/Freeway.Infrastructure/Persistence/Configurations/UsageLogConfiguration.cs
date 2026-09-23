@@ -45,6 +45,11 @@ public class UsageLogConfiguration : IEntityTypeConfiguration<UsageLog>
             .HasColumnName("upstream_provider")
             .HasMaxLength(100);
 
+        // Only set on rows served out of a subscription.
+        builder.Property(u => u.AvoidedCostUsd)
+            .HasColumnName("avoided_cost_usd")
+            .HasPrecision(20, 10);
+
         builder.Property(u => u.InputTokens)
             .HasColumnName("input_tokens")
             .HasDefaultValue(0);

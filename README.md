@@ -25,6 +25,7 @@ Freeway is a full-featured AI Gateway built with .NET 10 that:
 - **Daily Refresh**: Models updated via Hangfire background jobs
 - **Weekly Email Report**: Usage, cost and per-project breakdown emailed to the admin
 - **Spend Alerts**: Email when a project, model or the gateway overspends, or OpenRouter credit runs low
+- **Local Claude Code** (optional): Serve `paid:premium` from a host Claude Code subscription at no charge, falling back to a paid model whenever it is unavailable
 - **PostgreSQL Storage**: Persistent storage for projects, users, and usage data
 - **Web Control Panel**: Next.js 16 dashboard with JWT authentication
 - **Docker Ready**: Includes Dockerfile and compose.yml with Traefik support
@@ -321,6 +322,11 @@ Environment variables (see `.env.example`):
 | `ALERT_OPENROUTER_KEY_EXPIRY_DAYS` | No | Warn this many days before key expiry (default: 14) |
 | `CREDENTIAL_ALERTS_ENABLED` | No | Alert when any provider rejects its API key (default: true) |
 | `FREE_LANE_OPENROUTER_COUNT` | No | Zero-cost OpenRouter models the free lane may try (default: 3, 0 disables) |
+| `LOCAL_CLAUDE_ENABLED` | No | Serve `paid:premium` from a local Claude Code subscription (default: false) |
+| `LOCAL_CLAUDE_URL` | No | claude-bridge address, e.g. `http://172.17.0.1:8787` |
+| `LOCAL_CLAUDE_TOKEN` | No | Shared secret; must match `BRIDGE_TOKEN` on the host |
+| `LOCAL_CLAUDE_TIMEOUT_SECONDS` | No | Timeout for a bridge call (default: 150) |
+| `LOCAL_CLAUDE_HEALTH_CRON` | No | How often to probe the bridge (default: hourly) |
 
 ## Quick Start
 
@@ -545,6 +551,63 @@ curl "http://localhost:8080/admin/analytics/usage?project_id=YOUR_PROJECT_ID" \
   -H "X-Api-Key: your-admin-key"
 ```
 
+## Local Claude Code for the premium lane
+
+`paid:premium` can be served from a Claude Code subscription running on the host
+instead of a paid model, through the small sidecar in
+[`deploy/claude-bridge`](deploy/claude-bridge). Nothing is billed for those requests.
+
+**It is an optimisation, never a dependency.** If the bridge is missing, throttled,
+slow or returns anything unexpected, the request continues to the normal paid chain
+and the reason is written to the log:
+
+```
+Premium request could not use local Claude (exit 1: usage limit reached); using a paid model instead
+Premium request skipped local Claude (rate limited: ...); using a paid model instead
+```
+
+Only `paid:premium` is eligible. `free`, `paid:low`, `paid:moderate` and `image` are
+untouched.
+
+### What it actually costs
+
+Claude Code carries its agent scaffolding into every invocation. Measured on a
+trivial prompt:
+
+| invocation | input tokens | latency |
+|---|---|---|
+| default | 26,935 | 3.1s |
+| as the bridge invokes it | 9,428 | 1.9s |
+
+So roughly **9.4k tokens of overhead per request** before your own prompt, and several
+seconds of latency. It saves money and spends quota, several times faster than the
+equivalent API call would. Fine at low volume; it will exhaust a subscription quickly
+under real traffic.
+
+> Using a Claude Code subscription as the backend for an API gateway is likely outside
+> what that subscription permits. Anthropic sells API credits for serving applications.
+> This is off by default for that reason.
+
+### How it is logged
+
+A request served this way records `cost_source = "subscription"`, `cost_usd = 0`,
+`upstream_provider` set to the Claude model, and `avoided_cost_usd` holding what the
+same work would have cost at list price. The weekly email reports the count and the
+total avoided, and says why the route was idle when it was.
+
+### Health
+
+A probe runs hourly (`LOCAL_CLAUDE_HEALTH_CRON`) and records `available`,
+`rate_limited` or `unavailable`. The request path only ever reads that cached verdict,
+so it never blocks on a probe. A real request failing downgrades the verdict
+immediately, which is a better signal than the probe anyway.
+
+### Setup
+
+See [`deploy/claude-bridge/README.md`](deploy/claude-bridge/README.md). In short:
+install the sidecar on the host as the user who owns `~/.claude`, bind it to the
+docker bridge address, then set `LOCAL_CLAUDE_*` in the Freeway `.env`.
+
 ## Email Notifications
 
 Freeway emails the admin address in two situations.
@@ -678,6 +741,7 @@ Every request records what it cost and **where that figure came from**, in
 | `cost_source` | Meaning |
 |---------------|---------|
 | `provider` | The amount the upstream actually billed. Authoritative |
+| `subscription` | Served by local Claude Code. Nothing billed; `avoided_cost_usd` holds the list price that was not paid |
 | `free_tier` | Served by a provider's own free tier (Groq, Gemini, Mistral, Cohere, HuggingFace). Genuinely zero |
 | `estimated` | Tokens multiplied by a cached catalog price. Approximate |
 | `backfilled` | Re-costed after the fact at catalog prices. Approximate |
