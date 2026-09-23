@@ -29,43 +29,74 @@ subscription quickly under real traffic.
 
 ## Install
 
+### As a compose service (recommended)
+
+It is already declared in `compose.yml`. Point it at your credentials and turn the
+feature on in `.env`:
+
+```bash
+LOCAL_CLAUDE_ENABLED=true
+
+CLAUDE_HOME=/home/ubuntu      # whose ~/.claude and ~/.claude.json to mount
+CLAUDE_UID=1000               # id -u
+CLAUDE_GID=1000               # id -g
+```
+
+Check the uid actually owns them, or the container will not be able to refresh the
+token:
+
+```bash
+stat -c '%u %g' ~/.claude ~/.claude.json
+```
+
+Then:
+
+```bash
+docker compose up -d --build
+docker compose logs -f claude-bridge
+```
+
+No token, no URL and no systemd unit: the service publishes no ports and sits on a
+private network that only the API can reach, so there is nothing for a shared secret
+to protect against.
+
+**Both mounts are read-write on purpose.** Claude Code refreshes its OAuth token in
+`.credentials.json` and writes session state, so a read-only mount works right up
+until the token expires and then stops. `~/.claude.json` lives beside the directory
+rather than inside it, which is why there are two mounts and not one.
+
+**The host and the container share that state.** History, locks and daemon files are
+all in there. If you use Claude Code interactively on the same box, they are writing
+to the same files.
+
+### As a host service instead
+
+If you would rather the credentials never entered a container, run it on the host
+with the included systemd unit and set a `BRIDGE_TOKEN`:
+
 ```bash
 sudo mkdir -p /opt/claude-bridge
 sudo cp server.js /opt/claude-bridge/
 sudo cp claude-bridge.service /etc/systemd/system/
-
-# Set User=, BRIDGE_TOKEN= and (if needed) CLAUDE_BIN= first.
-sudoedit /etc/systemd/system/claude-bridge.service
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now claude-bridge
-sudo systemctl status claude-bridge
+sudoedit /etc/systemd/system/claude-bridge.service   # User=, BRIDGE_TOKEN=
+sudo systemctl daemon-reload && sudo systemctl enable --now claude-bridge
 ```
 
-Check the docker bridge address matches `BRIDGE_HOST`:
+Then in Freeway's `.env`, point at the docker bridge address and pass the token:
 
 ```bash
-ip addr show docker0 | grep 'inet '
+LOCAL_CLAUDE_URL=http://172.17.0.1:8787   # check: ip addr show docker0
+LOCAL_CLAUDE_TOKEN=the-same-BRIDGE_TOKEN
 ```
 
 ## Verify
 
 ```bash
-TOKEN=your-bridge-token
+# From the API container, on the compose network:
+docker compose exec freeway curl -s http://claude-bridge:8787/health
 
-curl -s -H "Authorization: Bearer $TOKEN" http://172.17.0.1:8787/health
-
-curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
-  -d '{"messages":[{"role":"user","content":"Reply with exactly: ok"}]}' \
-  http://172.17.0.1:8787/complete
-```
-
-Then point Freeway at it in `.env`:
-
-```bash
-LOCAL_CLAUDE_ENABLED=true
-LOCAL_CLAUDE_URL=http://172.17.0.1:8787
-LOCAL_CLAUDE_TOKEN=your-bridge-token
+# Or against a host install, with its token:
+curl -s -H "Authorization: Bearer $BRIDGE_TOKEN" http://172.17.0.1:8787/health
 ```
 
 ## Endpoints
@@ -79,5 +110,7 @@ LOCAL_CLAUDE_TOKEN=your-bridge-token
 same work would have cost at API list price — on a subscription it is the amount
 avoided, not the amount spent.
 
-Both endpoints require `Authorization: Bearer $BRIDGE_TOKEN`. Bind to the docker
-bridge address, never `0.0.0.0`, unless you have a firewall in front of it.
+`BRIDGE_TOKEN` is optional. When it is set both endpoints require
+`Authorization: Bearer $BRIDGE_TOKEN`; when it is unset the bridge runs open and says
+so at startup, which is only acceptable behind a private network with no published
+ports. If you expose it on a routable address, set a token.

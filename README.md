@@ -323,8 +323,10 @@ Environment variables (see `.env.example`):
 | `CREDENTIAL_ALERTS_ENABLED` | No | Alert when any provider rejects its API key (default: true) |
 | `FREE_LANE_OPENROUTER_COUNT` | No | Zero-cost OpenRouter models the free lane may try (default: 3, 0 disables) |
 | `LOCAL_CLAUDE_ENABLED` | No | Serve `paid:premium` from a local Claude Code subscription (default: false) |
-| `LOCAL_CLAUDE_URL` | No | claude-bridge address, e.g. `http://172.17.0.1:8787` |
-| `LOCAL_CLAUDE_TOKEN` | No | Shared secret; must match `BRIDGE_TOKEN` on the host |
+| `CLAUDE_HOME` | No | Home directory holding `.claude` and `.claude.json` to mount (default: `/home/ubuntu`) |
+| `CLAUDE_UID` / `CLAUDE_GID` | No | uid/gid owning those files (default: 1000) |
+| `LOCAL_CLAUDE_URL` | No | Bridge address (default: `http://claude-bridge:8787`) |
+| `LOCAL_CLAUDE_TOKEN` | No | Only needed if the bridge is exposed outside the compose network |
 | `LOCAL_CLAUDE_TIMEOUT_SECONDS` | No | Timeout for a bridge call (default: 150) |
 | `LOCAL_CLAUDE_HEALTH_CRON` | No | How often to probe the bridge (default: hourly) |
 
@@ -604,9 +606,27 @@ immediately, which is a better signal than the probe anyway.
 
 ### Setup
 
-See [`deploy/claude-bridge/README.md`](deploy/claude-bridge/README.md). In short:
-install the sidecar on the host as the user who owns `~/.claude`, bind it to the
-docker bridge address, then set `LOCAL_CLAUDE_*` in the Freeway `.env`.
+The bridge is a compose service. Point it at your credentials and switch it on:
+
+```bash
+LOCAL_CLAUDE_ENABLED=true
+CLAUDE_HOME=/home/ubuntu    # whose ~/.claude and ~/.claude.json to mount
+CLAUDE_UID=1000             # id -u  — must own those files
+CLAUDE_GID=1000             # id -g
+```
+
+Then `docker compose up -d --build`. No token and no URL: the bridge publishes no
+ports and sits on a private network only the API can reach.
+
+Both mounts are read-write because Claude Code refreshes its OAuth token and writes
+session state; a read-only mount works until the token expires. `~/.claude.json` sits
+beside the directory rather than inside it, hence two mounts. The host and the
+container share that state, so interactive use on the same box writes to the same
+files.
+
+If you would rather keep credentials off a container entirely,
+[`deploy/claude-bridge/README.md`](deploy/claude-bridge/README.md) covers running it
+on the host with systemd and a shared token instead.
 
 ## Email Notifications
 

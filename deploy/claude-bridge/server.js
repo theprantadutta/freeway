@@ -26,9 +26,15 @@ const HEALTH_TTL_MS = Number(process.env.BRIDGE_HEALTH_TTL_MS || 10 * 60 * 1000)
 const MAX_CONCURRENT = Number(process.env.BRIDGE_MAX_CONCURRENT || 1);
 const WORKDIR = process.env.BRIDGE_WORKDIR || "/tmp";
 
+// A token is required whenever the bridge is reachable from outside its own
+// network. On a private compose network with no published port there is nothing to
+// defend against, so it is optional there — but say so out loud, because an open
+// inference endpoint on a routable address would be a bad surprise.
 if (!TOKEN) {
-  console.error("BRIDGE_TOKEN is required: this endpoint runs inference, it must not be open.");
-  process.exit(1);
+  console.warn(
+    "BRIDGE_TOKEN is not set: running without authentication. " +
+    "Only do this when the service publishes no ports and sits on an internal network."
+  );
 }
 
 // Claude Code is an interactive developer tool, not a server. Running several at
@@ -203,6 +209,7 @@ function send(res, status, body) {
 }
 
 function authorised(req) {
+  if (!TOKEN) return true;
   const header = req.headers.authorization || "";
   return header === `Bearer ${TOKEN}`;
 }

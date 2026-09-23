@@ -12,6 +12,7 @@ services:
     restart: unless-stopped
     networks:
       - proxy
+      - internal
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.freeway.rule=Host(`freeway.pranta.dev`)"
@@ -24,6 +25,35 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # Wraps the host's Claude Code so the premium lane can be served from a
+  # subscription instead of a paid model.
+  #
+  # Optional: comment the whole service out and Freeway carries on using paid models.
+  # It publishes no ports and is not on the proxy network, so it is reachable only
+  # from other services here — which is why it needs no shared token.
+  #
+  # CLAUDE_HOME must point at the directory holding your Claude credentials, and
+  # CLAUDE_UID/GID must match whoever owns them (`id -u`, `stat -c %u ~/.claude`).
+  # The mounts are read-write on purpose: Claude Code refreshes its OAuth token and
+  # writes session state, so a read-only mount works until the token expires.
+  claude-bridge:
+    image: freeway-claude-bridge
+    container_name: freeway-claude-bridge
+    build:
+      context: ./deploy/claude-bridge
+      dockerfile: Dockerfile
+    user: "${CLAUDE_UID:-1000}:${CLAUDE_GID:-1000}"
+    volumes:
+      - ${CLAUDE_HOME:-/home/ubuntu}/.claude:/home/claude/.claude
+      - ${CLAUDE_HOME:-/home/ubuntu}/.claude.json:/home/claude/.claude.json
+    environment:
+      - BRIDGE_MAX_CONCURRENT=1
+      - BRIDGE_TIMEOUT_MS=120000
+      - BRIDGE_HEALTH_TTL_MS=600000
+    restart: unless-stopped
+    networks:
+      - internal
 
   freeway-web:
     image: freeway-web
@@ -55,3 +85,6 @@ services:
 networks:
   proxy:
     external: true
+  # Private to this compose project: the bridge is only reachable from the API.
+  internal:
+    driver: bridge

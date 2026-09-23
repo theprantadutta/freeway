@@ -44,15 +44,19 @@ public class LocalClaudeService : ILocalClaudeService
         _logger = logger;
 
         _enabled = bool.TryParse(Environment.GetEnvironmentVariable("LOCAL_CLAUDE_ENABLED"), out var e) && e;
-        _baseUrl = (Environment.GetEnvironmentVariable("LOCAL_CLAUDE_URL") ?? "").TrimEnd('/');
+        // Defaults to the compose service name, so the usual setup needs no URL at all.
+        _baseUrl = (Environment.GetEnvironmentVariable("LOCAL_CLAUDE_URL")
+                    ?? "http://claude-bridge:8787").TrimEnd('/');
         _token = Environment.GetEnvironmentVariable("LOCAL_CLAUDE_TOKEN") ?? "";
         _timeoutSeconds = int.TryParse(Environment.GetEnvironmentVariable("LOCAL_CLAUDE_TIMEOUT_SECONDS"), out var t)
             ? t
             : 150;
     }
 
-    public bool IsConfigured =>
-        _enabled && !string.IsNullOrWhiteSpace(_baseUrl) && !string.IsNullOrWhiteSpace(_token);
+    // The token is optional: on the private compose network the bridge publishes no
+    // ports, so there is nothing for a shared secret to protect against. It is still
+    // sent when set, for anyone exposing the bridge more widely.
+    public bool IsConfigured => _enabled && !string.IsNullOrWhiteSpace(_baseUrl);
 
     public LocalClaudeHealth Health => _healthCache.Current;
 
@@ -65,7 +69,7 @@ public class LocalClaudeService : ILocalClaudeService
             var off = new LocalClaudeHealth
             {
                 State = LocalClaudeState.Unknown,
-                Detail = "LOCAL_CLAUDE_ENABLED is off, or URL/token are not set",
+                Detail = "LOCAL_CLAUDE_ENABLED is off",
                 CheckedAt = DateTime.UtcNow
             };
             SetHealth(off);
@@ -75,7 +79,8 @@ public class LocalClaudeService : ILocalClaudeService
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}/health");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+            if (!string.IsNullOrWhiteSpace(_token))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
@@ -153,7 +158,8 @@ public class LocalClaudeService : ILocalClaudeService
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/complete");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+            if (!string.IsNullOrWhiteSpace(_token))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
             request.Content = JsonContent.Create(new
             {
                 messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToList(),
