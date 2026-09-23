@@ -155,9 +155,11 @@
 │  │  5. On failure: add to errors list, try next provider               │  │
 │  └─────────────────────────────────────────────────────────────────────┘  │
 │                                                                            │
-│  IF all free providers fail:                                               │
-│  └─► NO paid fallback: returns 503 if every free provider fails                          │
-│  └─► If that fails: return 502 with all error messages                     │
+│  IF all direct free providers fail:                                        │
+│  └─► Try OpenRouter's zero-cost models (FREE_LANE_OPENROUTER_COUNT)        │
+│  └─► Each re-checked for a zero price immediately before calling           │
+│  IF those fail too:                                                        │
+│  └─► 503. Never a paid model                                               │
 └───────────────────────────────────────────────────────────────────────────┘
                     │
                     ▼
@@ -280,12 +282,22 @@ model="free" request:
   │   └─► 500 Server Error → RETRY (500ms, 1000ms delays)     │
   │   └─► Still failing → move to next                        │
   │                                                           │
-  │ Try #3: OpenAI                                            │
+  │ Try #3: Mistral / Cohere / HuggingFace                    │
   │   └─► SUCCESS → Return result, update benchmark           │
+  │        cost 0, cost_source "free_tier"                    │
   │                                                           │
-  │ ALL FAILED:                                               │
-  │   └─► NO paid fallback: returns 503 if every free provider fails        │
+  │ ALL DIRECT PROVIDERS FAILED:                              │
+  │   └─► OpenRouter zero-cost models, selected first then    │
+  │       by rank, up to FREE_LANE_OPENROUTER_COUNT           │
+  │       each re-checked for a zero price before calling     │
+  │                                                           │
+  │ STILL NOTHING:                                            │
+  │   └─► 503. Never a paid model: a lane called "free"       │
+  │       must not produce a bill                             │
   └───────────────────────────────────────────────────────────┘
+
+  OpenAI is absent from this list on purpose: it bills per token, so it must
+  never sit in the free lane's rotation.
 ```
 
 ```
@@ -347,17 +359,23 @@ Configured via `OPENROUTER_PROVIDER_SORT`, `OPENROUTER_ALLOW_FALLBACKS`,
 
 ### 4. Supported Providers
 
-| Provider | Type | API Endpoint | Default Model |
-|----------|------|--------------|---------------|
-| Gemini | Free | `generativelanguage.googleapis.com/v1beta` | `gemini-2.0-flash-exp` |
-| Groq | Free | `api.groq.com/openai/v1` | Provider default |
-| OpenAI | Free* | `api.openai.com/v1` | `gpt-4o-mini` |
-| Mistral | Free | `api.mistral.ai/v1` | Provider default |
-| Cohere | Free | `api.cohere.com` | Provider default |
-| HuggingFace | Free | `api-inference.huggingface.co` | Provider default |
-| OpenRouter | Paid | `openrouter.ai/api/v1` | Selected cheapest |
+| Provider | In the free lane? | API Endpoint | Billing |
+|----------|-------------------|--------------|---------|
+| Gemini | yes | `generativelanguage.googleapis.com/v1beta` | Google's free tier |
+| Groq | yes | `api.groq.com/openai/v1` | Groq's free tier |
+| Mistral | yes | `api.mistral.ai/v1` | Mistral's free tier |
+| Cohere | yes | `api.cohere.com` | Cohere's trial tier |
+| HuggingFace | yes | `api-inference.huggingface.co` | HuggingFace's free tier |
+| OpenAI | **no** | `api.openai.com/v1` | Billed per token |
+| OpenRouter | zero-cost models only | `openrouter.ai/api/v1` | Billed per token |
 
-*OpenAI marked as "free" in this context means it's tried before paid OpenRouter fallback
+`IsFreeProvider` decides whether a provider may serve a `model:"free"` request.
+OpenAI was previously flagged `true`, which meant a free request could land on a
+billed OpenAI call. It is now `false`.
+
+OpenRouter is not a free provider either, but the free lane may use its zero-cost
+models as a last rung — each one re-checked for a zero price immediately before it
+is called.
 
 ---
 

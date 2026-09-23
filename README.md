@@ -26,7 +26,7 @@ Freeway is a full-featured AI Gateway built with .NET 10 that:
 - **Weekly Email Report**: Usage, cost and per-project breakdown emailed to the admin
 - **Spend Alerts**: Email when a project, model or the gateway overspends, or OpenRouter credit runs low
 - **PostgreSQL Storage**: Persistent storage for projects, users, and usage data
-- **Web Control Panel**: Next.js 15 dashboard with JWT authentication
+- **Web Control Panel**: Next.js 16 dashboard with JWT authentication
 - **Docker Ready**: Includes Dockerfile and compose.yml with Traefik support
 
 ## Architecture
@@ -40,7 +40,7 @@ freeway/
 │   ├── Freeway.Application/      # CQRS handlers, DTOs, Validators
 │   ├── Freeway.Infrastructure/   # EF Core, Provider clients, Caching
 │   ├── Freeway.Api/              # Controllers, Middleware
-│   └── Freeway.Web/              # Next.js 15 Control Panel
+│   └── Freeway.Web/              # Next.js 16 Control Panel
 ├── Dockerfile                    # API container
 ├── compose.yml
 └── .env.example
@@ -105,7 +105,7 @@ OpenAI-compatible chat completion endpoint.
 - `"paid:low"` - Cheapest paid models
 - `"paid:moderate"` - Balanced cost/capability models
 - `"paid:premium"` - Highest-capability models
-- `"image"` - Use cheapest image generation model (auto-selected)
+- `"image"` - Cheapest image generation model, ranked by what it costs to generate
 - `"<model_id>"` - Use specific model by ID
 
 ### Paid Tiers
@@ -429,7 +429,7 @@ freeway/
 │   │   ├── Middleware/            # Auth, Exception handling
 │   │   ├── Attributes/            # RequireAdmin, RequireProject
 │   │   └── Program.cs             # Application startup
-│   └── Freeway.Web/               # Next.js 15 Control Panel
+│   └── Freeway.Web/               # Next.js 16 Control Panel
 │       ├── src/
 │       │   ├── app/               # App Router pages
 │       │   │   ├── (auth)/        # Login page
@@ -454,6 +454,22 @@ The Next.js web panel provides:
 - Stats overview: Total projects, active projects, requests today, monthly cost
 - Selected models display (free, all three paid tiers, and image)
 - Quick navigation to all features
+
+### Design system
+
+Each model type owns a hue and keeps it everywhere it appears, so colour carries
+information rather than decorating: free is green, then the paid tiers run low blue,
+moderate amber, premium rose as a cost ladder, and image sits apart in violet. The
+mapping lives once in `src/lib/theme/accents.ts`.
+
+Chart marks are separate tokens from text tokens: marks want mid tones, text wants
+contrast against its surface. The mark set is validated for lightness band, chroma
+floor, colour-blind separation and surface contrast, and passes in both light and
+dark, so the same values are used in either mode.
+
+> Accent classes are referenced through `accents.ts` rather than written literally in
+> markup, so `tailwind.config.ts` must scan all of `./src/**`. Narrowing that glob
+> silently purges every lane colour.
 
 ### Models
 - Browse all available models (free, paid, and image tabs)
@@ -638,7 +654,10 @@ To customize domains, edit the Traefik labels in `compose.yml`.
 3. **Model selection**:
    - Free: Best = largest context length
    - Paid: Per tier, the first available curated model, else the cheapest in the tier's band
-   - Image: Best = lowest price from image generation models
+   - Image: Cheapest by `image_output`, the price to generate. Ranking on prompt +
+     completion would be meaningless, since nearly every image model reports 0 for
+     both. Auto-routers are excluded: OpenRouter reports variable pricing as `-1`,
+     which would otherwise sort them to the front of a cheapest-first list
 
 4. **Background jobs**:
    - Hangfire runs daily refresh at midnight UTC
@@ -651,7 +670,7 @@ To customize domains, edit the Traefik labels in `compose.yml`.
    - Request proxied to appropriate provider
    - Usage logged to database, with the cost the provider actually billed
 
-## Cost accounting
+## Cost Accounting
 
 Every request records what it cost and **where that figure came from**, in
 `usage_logs.cost_source`:
@@ -719,14 +738,17 @@ token, so it must never sit in the free lane's rotation.
 - **Scalar** - API documentation (available at `/scalar/v1` in development)
 
 ### Frontend (Web Panel)
-- **Next.js 15** - React framework with App Router
+- **Next.js 16** - React framework with App Router
 - **React 19** - UI library
-- **Tailwind CSS** - Styling
+- **Tailwind CSS** - Styling, driven by the semantic tokens in `globals.css`
+- **IBM Plex Sans / Mono** - Typography, with tabular figures on compared numbers
 - **TanStack Query** - Data fetching & caching
 - **Zustand** - State management
-- **Recharts** - Usage charts
 - **Lucide React** - Icons
 - **TypeScript** - Type safety
+
+Charts are plain HTML and CSS rather than a charting library. The one chart in the
+panel is a ranked bar list, which a `div` with a width does better than a dependency.
 
 ## License
 
