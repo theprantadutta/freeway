@@ -35,7 +35,15 @@ public class OpenRouterPricing
     public string Prompt { get; set; } = "0";
     public string Completion { get; set; } = "0";
     public string? Request { get; set; }
+
+    /// <summary>Price for an image supplied as input (vision).</summary>
     public string? Image { get; set; }
+
+    /// <summary>
+    /// Price for generated image output. This is what an image model actually
+    /// charges: most of them report 0 for prompt and completion.
+    /// </summary>
+    public string? ImageOutput { get; set; }
 }
 
 public class OpenRouterArchitecture

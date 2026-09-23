@@ -1,3 +1,4 @@
+using System.Globalization;
 using Freeway.Domain.Common;
 using Freeway.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -238,6 +239,7 @@ public class ModelCacheService : IModelCacheService
             // Fetch image models
             var imageModelsRaw = await _openRouterService.GetImageModelsAsync(cancellationToken);
             var imageModels = imageModelsRaw
+                .Where(IsValidImageModel)
                 .Select(m => new CachedModel
                 {
                     Id = m.Id,
@@ -246,10 +248,11 @@ public class ModelCacheService : IModelCacheService
                     ContextLength = m.ContextLength,
                     PromptPrice = m.Pricing.Prompt,
                     CompletionPrice = m.Pricing.Completion,
+                    ImagePrice = m.Pricing.ImageOutput,
                     IsFree = false,
                     IsImageModel = true
                 })
-                .OrderBy(m => GetTotalPrice(m))
+                .OrderBy(GetImageRankPrice)
                 .Select((m, i) => { m.Rank = i + 1; return m; })
                 .ToList();
 
@@ -409,18 +412,71 @@ public class ModelCacheService : IModelCacheService
         if (model.ContextLength < 8000)
             return false;
 
-        // Must have parseable numeric prices
-        if (!decimal.TryParse(model.Pricing.Prompt, out _) ||
-            !decimal.TryParse(model.Pricing.Completion, out _))
+        // Must have parseable, non-negative prices. OpenRouter uses -1 for variable.
+        if (!TryPrice(model.Pricing.Prompt, out var promptPrice) ||
+            !TryPrice(model.Pricing.Completion, out var completionPrice))
+            return false;
+
+        if (promptPrice < 0 || completionPrice < 0)
             return false;
 
         return true;
     }
 
+    /// <summary>
+    /// Image models were previously ranked with the same prompt+completion sum used
+    /// for text, which let two things through.
+    ///
+    /// OpenRouter reports variable pricing as -1, so "openrouter/auto" summed to -2
+    /// and sorted ahead of every real model in a cheapest-first list: the auto
+    /// router, which is not an image model at all, was being picked as the cheapest
+    /// image model. A negative price would also have produced a negative cost
+    /// estimate.
+    /// </summary>
+    private static bool IsValidImageModel(OpenRouterModel model)
+    {
+        if (model.Id.Contains("/auto", StringComparison.OrdinalIgnoreCase) ||
+            model.Id.Contains("router", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (model.Id.EndsWith(":batch", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Any component that will not parse, or that is negative, means the price is
+        // variable rather than cheap.
+        foreach (var raw in new[] { model.Pricing.Prompt, model.Pricing.Completion, model.Pricing.ImageOutput })
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            if (!TryPrice(raw, out var value) || value < 0) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Image generation is billed on output, so rank on that. Nearly every image
+    /// model reports 0 for prompt and completion, which made the old ordering
+    /// effectively arbitrary across dozens of models.
+    /// </summary>
+    private static decimal GetImageRankPrice(CachedModel model)
+    {
+        if (TryPrice(model.ImagePrice, out var imageOutput) && imageOutput > 0)
+            return imageOutput;
+
+        return GetTotalPrice(model);
+    }
+
+    /// <summary>
+    /// Prices arrive as API strings such as "0.0000001" or "2.39e-06". They are
+    /// never formatted for the host's locale, so parse them invariantly.
+    /// </summary>
+    private static bool TryPrice(string? raw, out decimal value) =>
+        decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+
     private static decimal GetTotalPrice(CachedModel model)
     {
-        decimal.TryParse(model.PromptPrice, out var prompt);
-        decimal.TryParse(model.CompletionPrice, out var completion);
+        TryPrice(model.PromptPrice, out var prompt);
+        TryPrice(model.CompletionPrice, out var completion);
         return prompt + completion;
     }
 }
