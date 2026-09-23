@@ -61,6 +61,9 @@ public class ProviderModelListResult
     /// </summary>
     public string? ErrorMessage { get; set; }
 
+    /// <summary>HTTP status from the provider, when the failure was an HTTP one.</summary>
+    public int? HttpStatusCode { get; set; }
+
     /// <summary>
     /// List of models fetched from the provider
     /// </summary>
@@ -81,14 +84,42 @@ public class ProviderModelListResult
         };
     }
 
-    public static ProviderModelListResult CreateError(string errorMessage, int responseTimeMs)
+    public static ProviderModelListResult CreateError(
+        string errorMessage,
+        int responseTimeMs,
+        int? httpStatusCode = null)
     {
         return new ProviderModelListResult
         {
             Success = false,
             ErrorMessage = errorMessage,
-            ResponseTimeMs = responseTimeMs
+            ResponseTimeMs = responseTimeMs,
+            HttpStatusCode = httpStatusCode
         };
+    }
+
+    /// <summary>
+    /// True when the provider rejected the credential rather than failing for some
+    /// transient reason. 401/403 are the usual shape; Gemini answers 400 with
+    /// API_KEY_INVALID, which is a rejection too.
+    /// </summary>
+    public bool IsCredentialFailure
+    {
+        get
+        {
+            if (Success) return false;
+            if (HttpStatusCode is 401 or 403) return true;
+
+            // A bare 400 is not enough: it is just as likely to be a malformed
+            // request. Only treat it as a rejection when the body says so, which is
+            // how Gemini reports a bad key.
+            var message = ErrorMessage ?? "";
+            return message.Contains("API_KEY_INVALID", StringComparison.OrdinalIgnoreCase)
+                   || message.Contains("API key not valid", StringComparison.OrdinalIgnoreCase)
+                   || message.Contains("invalid_api_key", StringComparison.OrdinalIgnoreCase)
+                   || message.Contains("Incorrect API key", StringComparison.OrdinalIgnoreCase)
+                   || message.Contains("invalid authentication", StringComparison.OrdinalIgnoreCase);
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+using Freeway.Domain.Entities;
 using Freeway.Domain.Interfaces;
 using Freeway.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +15,8 @@ public interface ISpendAlertJob
 }
 
 /// <summary>
-/// Watches for spend that does not look like normal use.
+/// Watches for spend that does not look like normal use, and for provider
+/// credentials that have stopped working.
 ///
 /// The practical motivation is a leaked project key: the gateway does not enforce
 /// rate limits, so the first signal of abuse is a spend or request-count spike.
@@ -26,6 +28,7 @@ public class SpendAlertJob : ISpendAlertJob
 {
     private readonly AppDbContext _context;
     private readonly IOpenRouterService _openRouterService;
+    private readonly IEnumerable<IModelFetcher> _modelFetchers;
     private readonly IEmailSender _email;
     private readonly IAlertCooldownCache _cooldown;
     private readonly ILogger<SpendAlertJob> _logger;
@@ -33,12 +36,14 @@ public class SpendAlertJob : ISpendAlertJob
     public SpendAlertJob(
         AppDbContext context,
         IOpenRouterService openRouterService,
+        IEnumerable<IModelFetcher> modelFetchers,
         IEmailSender email,
         IAlertCooldownCache cooldown,
         ILogger<SpendAlertJob> logger)
     {
         _context = context;
         _openRouterService = openRouterService;
+        _modelFetchers = modelFetchers;
         _email = email;
         _cooldown = cooldown;
         _logger = logger;
@@ -218,7 +223,65 @@ public class SpendAlertJob : ISpendAlertJob
         // 6. OpenRouter credit and key health.
         await AddCreditAlertsAsync(alerts, cancellationToken);
 
+        // 7. Every other provider credential.
+        await AddCredentialAlertsAsync(alerts, cancellationToken);
+
         return alerts;
+    }
+
+    /// <summary>
+    /// Asks each configured provider for its model list and reports any that reject
+    /// the credential.
+    ///
+    /// Only OpenRouter publishes an expiry date, so for everyone else "expired" is
+    /// indistinguishable from revoked, deleted or restricted: what the gateway can
+    /// observe is that the key stopped being accepted, which is the thing worth an
+    /// email either way. A transient outage is deliberately not reported, so a
+    /// provider having a bad afternoon does not look like a dead key.
+    /// </summary>
+    private async Task AddCredentialAlertsAsync(List<SpendAlert> alerts, CancellationToken cancellationToken)
+    {
+        var enabled = !bool.TryParse(Environment.GetEnvironmentVariable("CREDENTIAL_ALERTS_ENABLED"), out var e) || e;
+        if (!enabled) return;
+
+        foreach (var fetcher in _modelFetchers.Where(f => f.CanFetch))
+        {
+            ProviderModelListResult result;
+            try
+            {
+                result = await fetcher.FetchModelsAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Credential probe for {Provider} threw; treating as transient", fetcher.ProviderName);
+                continue;
+            }
+
+            if (!result.IsCredentialFailure)
+            {
+                if (!result.Success)
+                {
+                    _logger.LogDebug(
+                        "{Provider} model fetch failed but does not look like a credential problem: {Error}",
+                        fetcher.ProviderName, result.ErrorMessage);
+                }
+                continue;
+            }
+
+            var envVar = $"{fetcher.ProviderName.ToUpperInvariant()}_API_KEY";
+            alerts.Add(new SpendAlert
+            {
+                Key = $"provider-credential:{fetcher.ProviderName}",
+                Severity = AlertSeverity.Critical,
+                Title = $"{fetcher.ProviderName} is rejecting its API key",
+                Detail =
+                    $"{fetcher.ProviderName} refused the configured credential" +
+                    (result.HttpStatusCode is { } code ? $" (HTTP {code})" : "") +
+                    ". It may have expired, been revoked, or be restricted to the wrong origin. " +
+                    "That provider is out of rotation until the key is replaced.",
+                Action = $"Issue a new key, update {envVar} in the production .env, and restart the container."
+            });
+        }
     }
 
     private async Task AddCreditAlertsAsync(List<SpendAlert> alerts, CancellationToken cancellationToken)

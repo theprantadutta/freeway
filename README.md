@@ -319,6 +319,8 @@ Environment variables (see `.env.example`):
 | `ALERT_OPENROUTER_CREDIT_USD` | No | Warn below this remaining credit (default: 2) |
 | `ALERT_OPENROUTER_KEY_REMAINING_USD` | No | Warn below this remaining key limit (default: 1) |
 | `ALERT_OPENROUTER_KEY_EXPIRY_DAYS` | No | Warn this many days before key expiry (default: 14) |
+| `CREDENTIAL_ALERTS_ENABLED` | No | Alert when any provider rejects its API key (default: true) |
+| `FREE_LANE_OPENROUTER_COUNT` | No | Zero-cost OpenRouter models the free lane may try (default: 3, 0 disables) |
 
 ## Quick Start
 
@@ -562,7 +564,14 @@ runaway key produces one email rather than one per check.
 | Monthly budget | Month-to-date spend exceeds `ALERT_MONTHLY_USD` |
 | Credit low | OpenRouter remaining credit falls below `ALERT_OPENROUTER_CREDIT_USD` |
 | Key limit low | The key's remaining limit falls below `ALERT_OPENROUTER_KEY_REMAINING_USD` |
-| Key expiring | The key expires within `ALERT_OPENROUTER_KEY_EXPIRY_DAYS` days |
+| Key expiring | The OpenRouter key expires within `ALERT_OPENROUTER_KEY_EXPIRY_DAYS` days |
+| Credential rejected | Any provider refuses its configured API key |
+
+Only OpenRouter publishes an expiry date. For every other provider, an expired key is
+indistinguishable from one that was revoked, deleted or restricted to the wrong
+origin — what the gateway can observe is that it stopped being accepted, which is the
+thing worth an email either way. A transient outage is deliberately not reported, so a
+provider having a bad afternoon does not look like a dead key.
 
 The request-count alert exists because `rate_limit_per_minute` is stored but not
 enforced. A leaked project key is most visible as a spend or request-rate spike, and
@@ -664,6 +673,22 @@ This matters because of provider routing: with `OPENROUTER_PROVIDER_SORT=through
 the endpoint serving a request may not charge the model's headline rate. A measured
 request billed `$0.00000036` where the cached-price estimate gave `$0.00000025` — a
 44% under-estimate on a single call.
+
+### What the free lane tries
+
+In order, stopping at the first success:
+
+1. Direct free-tier providers (Groq, Gemini, Mistral, Cohere, HuggingFace), in
+   benchmark-ranked order
+2. OpenRouter's own zero-cost models, selected model first then by rank, up to
+   `FREE_LANE_OPENROUTER_COUNT`
+3. `503` — never a paid model
+
+Step 2 exists because those models were being fetched, ranked and shown on the
+dashboard while being unreachable: the orchestrator only considered providers flagged
+`IsFreeProvider`, and OpenRouter is not one. The "selected free model" was decorative.
+Each candidate is re-checked for having a zero price before it is called, so this rung
+cannot produce a charge whatever the catalog says.
 
 ### Why `free` never falls back to paid
 
