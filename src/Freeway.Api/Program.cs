@@ -209,7 +209,17 @@ try
             "local-claude-health",
             job => job.CheckAsync(),
             localClaudeCron);
-        Log.Information("Local Claude health probe scheduled: {Cron}", localClaudeCron);
+
+        // Probe once now as well. The recurring job fires on the hour, so without
+        // this the verdict stays Unknown after a deploy and the premium lane quietly
+        // uses a paid model until the next o'clock. Enqueued rather than awaited so
+        // a slow or hanging bridge cannot hold up startup.
+        BackgroundJob.Enqueue<Freeway.Infrastructure.Jobs.ILocalClaudeHealthJob>(
+            job => job.CheckAsync());
+
+        Log.Information(
+            "Local Claude health probe scheduled: {Cron}, with one run queued now",
+            localClaudeCron);
     }
     else
     {

@@ -165,6 +165,62 @@ public class AdminController : BaseApiController
 
     #endregion
 
+    #region Local Claude
+
+    /// <summary>
+    /// Whether the premium lane can currently be served from local Claude Code, and
+    /// why not when it cannot. Reads the cached verdict; performs no network call.
+    /// </summary>
+    [HttpGet("local-claude")]
+    public ActionResult GetLocalClaudeStatus([FromServices] ILocalClaudeService localClaude)
+    {
+        var health = localClaude.Health;
+        return Ok(new
+        {
+            configured = localClaude.IsConfigured,
+            can_serve = health.CanServe,
+            state = health.State.ToString().ToLowerInvariant(),
+            summary = health.Describe(),
+            detail = health.Detail,
+            latency_ms = health.LatencyMs,
+            model = health.Model,
+            checked_at = health.CheckedAt
+        });
+    }
+
+    /// <summary>
+    /// Probes the bridge now and returns the fresh verdict, rather than waiting for
+    /// the hourly job.
+    /// </summary>
+    [HttpPost("local-claude/check")]
+    public async Task<ActionResult> CheckLocalClaude([FromServices] ILocalClaudeService localClaude)
+    {
+        if (!localClaude.IsConfigured)
+        {
+            return Ok(new
+            {
+                configured = false,
+                summary = "LOCAL_CLAUDE_ENABLED is off",
+                hint = "Set LOCAL_CLAUDE_ENABLED=true and restart the API container."
+            });
+        }
+
+        var health = await localClaude.CheckHealthAsync();
+        return Ok(new
+        {
+            configured = true,
+            can_serve = health.CanServe,
+            state = health.State.ToString().ToLowerInvariant(),
+            summary = health.Describe(),
+            detail = health.Detail,
+            latency_ms = health.LatencyMs,
+            model = health.Model,
+            checked_at = health.CheckedAt
+        });
+    }
+
+    #endregion
+
     #region Notifications
 
     /// <summary>

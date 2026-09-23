@@ -239,6 +239,8 @@ The model must belong to the tier being set; a mismatch returns `400`.
 #### Notifications
 
 ```bash
+GET  /admin/local-claude                         # Can premium use local Claude right now, and why not
+POST /admin/local-claude/check                   # Probe the bridge now instead of waiting for the hourly job
 GET  /admin/notifications/weekly-report/preview  # Build the report as JSON, send nothing
 POST /admin/notifications/weekly-report/send     # Send the weekly report now
 GET  /admin/notifications/alerts                 # Alerts currently firing, ignoring cooldown
@@ -599,8 +601,16 @@ total avoided, and says why the route was idle when it was.
 
 ### Health
 
-A probe runs hourly (`LOCAL_CLAUDE_HEALTH_CRON`) and records `available`,
-`rate_limited` or `unavailable`. The request path only ever reads that cached verdict,
+A probe runs hourly (`LOCAL_CLAUDE_HEALTH_CRON`), plus once on startup. Without that
+startup run the verdict would sit at `unknown` after every deploy and the premium lane
+would quietly use a paid model until the next o'clock. It records `available`,
+`rate_limited` or `unavailable`.
+
+Check where it stands at any time:
+
+```bash
+curl -s https://freeway.pranta.dev/admin/local-claude -H "X-Api-Key: $ADMIN_API_KEY"
+``` The request path only ever reads that cached verdict,
 so it never blocks on a probe. A real request failing downgrades the verdict
 immediately, which is a better signal than the probe anyway.
 
