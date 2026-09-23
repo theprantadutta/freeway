@@ -103,40 +103,62 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             modelType = resolved.ModelType;
             modelTier = resolved.Tier?.ToSlug();
 
-            // Premium can be served from a local Claude Code subscription at no
-            // charge. It is strictly an optimisation: anything at all wrong with it
-            // and the request carries on to the paid chain below, with the reason in
-            // the log. Only this lane is eligible.
-            if (resolved.Tier == PaidTier.Premium && _localClaude.IsConfigured)
+            // Build an ordered candidate list. For the "paid"/"paid:<tier>"/"image" virtual
+            // models we include backup models so one rate-limited/failing model does not fail
+            // the whole request. Specific model IDs keep single-attempt semantics.
+            var candidates = BuildPaidCandidates(request.Model, resolved);
+
+            // Two lanes can be served from the local Claude Code subscription at no
+            // charge, on different terms.
+            //
+            // Premium is the lane the subscription exists for: it displaces
+            // frontier-model pricing, so it queues, waits, and may spend the whole
+            // hourly budget. Moderate only rides along on genuinely spare capacity --
+            // it displaces models costing a fraction of a cent, so it is never worth
+            // a wait or a share of premium's reserve, and the bridge refuses it
+            // instantly when either is in question.
+            //
+            // Both are strictly optimisations. Anything wrong and the request carries
+            // on to the paid chain below with the reason in the log.
+            var localPriority = resolved.Tier switch
+            {
+                PaidTier.Premium => (LocalClaudePriority?)LocalClaudePriority.Premium,
+                PaidTier.Moderate => LocalClaudePriority.Spillover,
+                _ => null
+            };
+
+            if (localPriority is { } priority && _localClaude.IsConfigured)
             {
                 var health = _localClaude.Health;
                 if (health.CanServe)
                 {
-                    var local = await _localClaude.CompleteAsync(messages, options, cancellationToken);
+                    var local = await _localClaude.CompleteAsync(messages, options, priority, cancellationToken);
                     if (local.Success)
                     {
+                        // What was avoided is what the model this request would
+                        // otherwise have used costs -- not what Claude would have
+                        // billed. For moderate those differ by a factor of tens, and
+                        // reporting Claude's list price there would overstate the
+                        // saving badly in the weekly figures.
+                        local.AvoidedCostUsd = EstimateAvoidedCost(candidates, local) ?? local.AvoidedCostUsd;
+
                         _ = Task.Run(() => LogUsageInBackgroundAsync(
                             request, local.Model, modelType, modelTier, null, local));
 
                         return Result<ChatCompletionResponseDto>.Success(ToDto(local));
                     }
 
-                    _logger.LogWarning(
-                        "Premium request could not use local Claude ({Reason}); using a paid model instead",
-                        local.ErrorMessage);
+                    _logger.LogInformation(
+                        "{Tier} request did not use local Claude ({Reason}); using a paid model instead",
+                        resolved.Tier, local.ErrorMessage);
                 }
                 else
                 {
                     _logger.LogInformation(
-                        "Premium request skipped local Claude ({Status}); using a paid model instead",
-                        health.Describe());
+                        "{Tier} request skipped local Claude ({Status}); using a paid model instead",
+                        resolved.Tier, health.Describe());
                 }
             }
-
-            // Build an ordered candidate list. For the "paid"/"paid:<tier>"/"image" virtual
-            // models we include backup models so one rate-limited/failing model does not fail
-            // the whole request. Specific model IDs keep single-attempt semantics.
-            var candidates = BuildPaidCandidates(request.Model, resolved);
 
             if (candidates.Count == 0)
             {
@@ -192,6 +214,38 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
     /// tier's chain as backups. Specific model IDs resolve to a single candidate (no silent
     /// substitution).
     /// </summary>
+    /// <summary>
+    /// What this request would have cost had it gone to a paid model, using the
+    /// model it would actually have reached first and the tokens it actually used.
+    ///
+    /// The CLI reports what Claude would have billed, which is only a fair stand-in
+    /// for the premium lane, where the model it displaces is priced similarly. For
+    /// moderate it is out by more than an order of magnitude, and recording it there
+    /// would inflate the "avoided" column in the weekly report into fiction. Returns
+    /// null when the model's pricing is unknown, so the caller keeps what it had.
+    /// </summary>
+    private static decimal? EstimateAvoidedCost(
+        List<(string modelId, CachedModel? model)> candidates,
+        ChatCompletionResult local)
+    {
+        var model = candidates.Select(c => c.model).FirstOrDefault(m => m is not null);
+        if (model is null) return null;
+
+        if (!decimal.TryParse(model.PromptPrice, NumberStyles.Float, CultureInfo.InvariantCulture, out var prompt) ||
+            !decimal.TryParse(model.CompletionPrice, NumberStyles.Float, CultureInfo.InvariantCulture, out var completion) ||
+            prompt < 0 || completion < 0)
+        {
+            return null;
+        }
+
+        // Both prices are per token, as OpenRouter publishes them.
+        var estimate =
+            prompt * local.Usage.PromptTokens +
+            completion * local.Usage.CompletionTokens;
+
+        return estimate > 0 ? estimate : null;
+    }
+
     private List<(string modelId, CachedModel? model)> BuildPaidCandidates(
         string requestedModel,
         ResolvedModel resolved)

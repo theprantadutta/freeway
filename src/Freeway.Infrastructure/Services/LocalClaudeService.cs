@@ -25,6 +25,7 @@ public class LocalClaudeService : ILocalClaudeService
     private readonly string _baseUrl;
     private readonly string _token;
     private readonly int _timeoutSeconds;
+    private readonly int _spilloverTimeoutSeconds;
 
     private readonly ILocalClaudeHealthCache _healthCache;
 
@@ -51,6 +52,14 @@ public class LocalClaudeService : ILocalClaudeService
         _timeoutSeconds = int.TryParse(Environment.GetEnvironmentVariable("LOCAL_CLAUDE_TIMEOUT_SECONDS"), out var t)
             ? t
             : 150;
+
+        // Spillover waits seconds, not minutes. It is only worth taking when it is
+        // faster than the paid model it replaces; past this it has already lost, and
+        // the request is better off going to the model it would have used anyway.
+        _spilloverTimeoutSeconds =
+            int.TryParse(Environment.GetEnvironmentVariable("LOCAL_CLAUDE_SPILLOVER_TIMEOUT_SECONDS"), out var st)
+                ? st
+                : 5;
     }
 
     // The token is optional: on the private compose network the bridge publishes no
@@ -113,6 +122,8 @@ public class LocalClaudeService : ILocalClaudeService
                 Detail = parsed.Detail,
                 LatencyMs = parsed.LatencyMs,
                 Model = parsed.Model,
+                Busy = parsed.Busy,
+                Budget = parsed.Budget,
                 CheckedAt = DateTime.UtcNow
             };
             SetHealth(health);
@@ -146,13 +157,15 @@ public class LocalClaudeService : ILocalClaudeService
     public async Task<ChatCompletionResult> CompleteAsync(
         List<ChatMessage> messages,
         ChatCompletionOptions? options = null,
+        LocalClaudePriority priority = LocalClaudePriority.Premium,
         CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
+        var spillover = priority == LocalClaudePriority.Spillover;
 
         if (!IsConfigured)
         {
-            return Failed("local Claude is not configured", stopwatch);
+            return Failed("local Claude is not configured", stopwatch, spillover);
         }
 
         try
@@ -163,11 +176,13 @@ public class LocalClaudeService : ILocalClaudeService
             request.Content = JsonContent.Create(new
             {
                 messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToList(),
-                maxTokens = options?.MaxTokens
+                maxTokens = options?.MaxTokens,
+                priority = spillover ? "spillover" : "premium"
             });
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
+            cts.CancelAfter(TimeSpan.FromSeconds(
+                spillover ? _spilloverTimeoutSeconds : _timeoutSeconds));
 
             var response = await _httpClient.SendAsync(request, cts.Token);
             var body = await response.Content.ReadAsStringAsync(cts.Token);
@@ -182,24 +197,35 @@ public class LocalClaudeService : ILocalClaudeService
 
             if (parsed is null || !parsed.Ok)
             {
-                // A refusal here is the freshest evidence we have, so the cached
-                // verdict is downgraded rather than left saying "available".
                 var reason = parsed?.Reason ?? "bridge returned an unreadable body";
-                SetHealth(new LocalClaudeHealth
+
+                // "busy" and "budget" are the bridge working as designed, not failing:
+                // it is declining spillover to protect premium's share. Treating them
+                // as evidence of ill health would let cheap traffic mark the bridge
+                // unavailable and lock premium out of the subscription entirely --
+                // the exact outcome the reserve exists to prevent.
+                var deliberate = parsed?.ReasonCode is "busy" or "budget";
+
+                if (!deliberate)
                 {
-                    State = reason.Contains("rate", StringComparison.OrdinalIgnoreCase)
-                        ? LocalClaudeState.RateLimited
-                        : LocalClaudeState.Unavailable,
-                    Detail = reason,
-                    CheckedAt = DateTime.UtcNow
-                });
-                return Failed(reason, stopwatch);
+                    SetHealth(new LocalClaudeHealth
+                    {
+                        State = reason.Contains("rate", StringComparison.OrdinalIgnoreCase)
+                            ? LocalClaudeState.RateLimited
+                            : LocalClaudeState.Unavailable,
+                        Detail = reason,
+                        CheckedAt = DateTime.UtcNow
+                    });
+                }
+
+                return Failed(reason, stopwatch, spillover, deliberate);
             }
 
             _logger.LogInformation(
-                "Premium request served by local Claude ({Model}) in {Duration}ms, {Prompt}+{Completion} tokens, ${Avoided} of list price avoided",
+                "{Lane} request served by local Claude ({Model}) in {Duration}ms, {Prompt}+{Completion} tokens, no charge",
+                spillover ? "Spillover" : "Premium",
                 parsed.Model ?? "unknown", parsed.DurationMs ?? stopwatch.ElapsedMilliseconds,
-                parsed.PromptTokens, parsed.CompletionTokens, parsed.ListCostUsd);
+                parsed.PromptTokens, parsed.CompletionTokens);
 
             return new ChatCompletionResult
             {
@@ -239,25 +265,52 @@ public class LocalClaudeService : ILocalClaudeService
         catch (Exception ex)
         {
             stopwatch.Stop();
-            SetHealth(new LocalClaudeHealth
+
+            // A spillover call gives up after a few seconds. Hitting that deadline
+            // says the bridge was slow for a lane that refuses to wait, not that it
+            // is unfit for premium, which is allowed minutes -- so it leaves the
+            // cached verdict alone.
+            if (!spillover)
             {
-                State = LocalClaudeState.Unavailable,
-                Detail = ex.Message,
-                CheckedAt = DateTime.UtcNow
-            });
-            return Failed($"could not reach the bridge: {ex.Message}", stopwatch);
+                SetHealth(new LocalClaudeHealth
+                {
+                    State = LocalClaudeState.Unavailable,
+                    Detail = ex.Message,
+                    CheckedAt = DateTime.UtcNow
+                });
+            }
+
+            return Failed($"could not reach the bridge: {ex.Message}", stopwatch, spillover);
         }
     }
 
-    private ChatCompletionResult Failed(string reason, Stopwatch stopwatch)
+    private ChatCompletionResult Failed(
+        string reason,
+        Stopwatch stopwatch,
+        bool spillover = false,
+        bool deliberate = false)
     {
         stopwatch.Stop();
-        _logger.LogWarning("Could not use local Claude ({Reason}); falling back to a paid model", reason);
+
+        // A declined spillover is the normal case, many times an hour. Logging it at
+        // warning would bury the failures that actually want attention.
+        if (spillover || deliberate)
+        {
+            _logger.LogDebug("Local Claude declined ({Reason}); using a paid model", reason);
+        }
+        else
+        {
+            _logger.LogWarning("Could not use local Claude ({Reason}); falling back to a paid model", reason);
+        }
 
         return new ChatCompletionResult
         {
             Success = false,
-            ErrorMessage = $"local Claude unavailable: {reason}",
+            // "declined" and "unavailable" are different things, and the log is read
+            // to tell them apart: one is the budget working, the other wants looking at.
+            ErrorMessage = (spillover || deliberate)
+                ? $"local Claude declined: {reason}"
+                : $"local Claude unavailable: {reason}",
             ProviderName = "claude-code",
             ResponseTimeMs = (int)stopwatch.ElapsedMilliseconds
         };
@@ -270,12 +323,17 @@ public class LocalClaudeService : ILocalClaudeService
         public string? Detail { get; set; }
         public int? LatencyMs { get; set; }
         public string? Model { get; set; }
+        public bool Busy { get; set; }
+        public LocalClaudeBudget? Budget { get; set; }
     }
 
     private class BridgeCompletion
     {
         public bool Ok { get; set; }
         public string? Reason { get; set; }
+
+        /// <summary>"busy" or "budget" when the bridge declined on purpose.</summary>
+        public string? ReasonCode { get; set; }
         public string? Text { get; set; }
         public string? Model { get; set; }
         public decimal ListCostUsd { get; set; }
