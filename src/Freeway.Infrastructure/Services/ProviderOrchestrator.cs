@@ -1,3 +1,4 @@
+using System.Globalization;
 using Freeway.Domain.Entities;
 using Freeway.Domain.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -9,6 +10,7 @@ public class ProviderOrchestrator : IProviderOrchestrator
     private readonly IEnumerable<IAiProvider> _providers;
     private readonly IProviderBenchmarkCache _benchmarkCache;
     private readonly IProviderModelCache _providerModelCache;
+    private readonly IModelCacheService _modelCacheService;
     private readonly ILogger<ProviderOrchestrator> _logger;
 
     // Retry configuration
@@ -19,11 +21,13 @@ public class ProviderOrchestrator : IProviderOrchestrator
         IEnumerable<IAiProvider> providers,
         IProviderBenchmarkCache benchmarkCache,
         IProviderModelCache providerModelCache,
+        IModelCacheService modelCacheService,
         ILogger<ProviderOrchestrator> logger)
     {
         _providers = providers;
         _benchmarkCache = benchmarkCache;
         _providerModelCache = providerModelCache;
+        _modelCacheService = modelCacheService;
         _logger = logger;
     }
 
@@ -79,6 +83,39 @@ public class ProviderOrchestrator : IProviderOrchestrator
             _benchmarkCache.AddBenchmarkResult(providerName, result.ResponseTimeMs, false);
         }
 
+        // Last free rung: OpenRouter's own zero-cost models. These are fetched and
+        // ranked on every refresh but were never actually reachable, because the loop
+        // above only considers providers flagged IsFreeProvider and OpenRouter is not
+        // one. That left the "selected free model" shown on the dashboard purely
+        // decorative, and threw away a couple of dozen usable free models.
+        if (providersDict.TryGetValue("openrouter", out var openRouter) && openRouter.IsEnabled)
+        {
+            foreach (var candidate in BuildOpenRouterFreeCandidates())
+            {
+                _logger.LogDebug("Trying OpenRouter free model {Model}", candidate.Id);
+                var result = await TryProviderWithRetryAsync(
+                    openRouter, candidate.Id, messages, options, cancellationToken);
+
+                if (result.Success)
+                {
+                    _logger.LogInformation(
+                        "Request succeeded with OpenRouter free model {Model}", candidate.Id);
+
+                    // If OpenRouter reported what it billed, keep that: it should be
+                    // zero here, and if it ever is not, that must be visible rather
+                    // than overwritten with an assumption.
+                    if (result.CostSource is null)
+                    {
+                        result.CostUsd = 0m;
+                        result.CostSource = "free_tier";
+                    }
+                    return result;
+                }
+
+                errors.Add($"openrouter/{candidate.Id}: {result.ErrorMessage}");
+            }
+        }
+
         // Deliberately no paid fallback here.
         //
         // This used to fall through to a paid OpenRouter model when every free
@@ -99,6 +136,54 @@ public class ProviderOrchestrator : IProviderOrchestrator
             CostUsd = 0m,
             CostSource = "free_tier"
         };
+    }
+
+    /// <summary>
+    /// The zero-cost OpenRouter models to try, admin-selected one first then the rest
+    /// by rank. Every candidate is re-checked for being genuinely free: this rung must
+    /// never be able to produce a charge, whatever the catalog says.
+    /// </summary>
+    private List<CachedModel> BuildOpenRouterFreeCandidates()
+    {
+        var limit = int.TryParse(
+            Environment.GetEnvironmentVariable("FREE_LANE_OPENROUTER_COUNT"), out var n) && n >= 0
+            ? n
+            : 3;
+
+        if (limit == 0) return new List<CachedModel>();
+
+        var candidates = new List<CachedModel>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(CachedModel? model)
+        {
+            if (model is null || string.IsNullOrEmpty(model.Id)) return;
+            if (!IsGenuinelyFree(model)) return;
+            if (!seen.Add(model.Id)) return;
+            candidates.Add(model);
+        }
+
+        Add(_modelCacheService.GetSelectedFreeModel());
+        foreach (var model in _modelCacheService.GetFreeModels())
+        {
+            if (candidates.Count >= limit) break;
+            Add(model);
+        }
+
+        return candidates;
+    }
+
+    /// <summary>
+    /// A model only counts as free when both its prices parse to zero. The ":free"
+    /// suffix alone is not trusted here, because this is the guard standing between
+    /// the free lane and a bill.
+    /// </summary>
+    private static bool IsGenuinelyFree(CachedModel model)
+    {
+        return decimal.TryParse(model.PromptPrice, NumberStyles.Float, CultureInfo.InvariantCulture, out var prompt)
+               && decimal.TryParse(model.CompletionPrice, NumberStyles.Float, CultureInfo.InvariantCulture, out var completion)
+               && prompt == 0m
+               && completion == 0m;
     }
 
     private async Task<ChatCompletionResult> TryProviderWithRetryAsync(

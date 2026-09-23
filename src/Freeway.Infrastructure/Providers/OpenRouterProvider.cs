@@ -146,8 +146,9 @@ public class OpenRouterProvider : BaseAiProvider, IModelFetcher
                 var errorContent = await response.Content.ReadAsStringAsync(cts.Token);
                 Logger.LogError("OpenRouter models API error: {StatusCode} - {Content}", response.StatusCode, errorContent);
                 return ProviderModelListResult.CreateError(
-                    $"API returned {response.StatusCode}",
-                    (int)stopwatch.ElapsedMilliseconds);
+                    $"API returned {response.StatusCode}: {errorContent}",
+                    (int)stopwatch.ElapsedMilliseconds,
+                    (int)response.StatusCode);
             }
 
             var content = await response.Content.ReadAsStringAsync(cts.Token);
