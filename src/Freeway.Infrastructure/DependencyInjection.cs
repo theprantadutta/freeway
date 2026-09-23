@@ -39,6 +39,7 @@ public static class DependencyInjection
 
         // Add HttpClient for OpenRouter (legacy service)
         services.AddHttpClient<IOpenRouterService, OpenRouterService>();
+        services.AddHttpClient<ILocalClaudeService, LocalClaudeService>();
 
         // Register AI Providers with HttpClient
         services.AddHttpClient<GeminiProvider>();
@@ -80,6 +81,7 @@ public static class DependencyInjection
         services.AddSingleton<IProviderBenchmarkCache, ProviderBenchmarkCache>();
         services.AddSingleton<IProviderModelCache, ProviderModelCache>();
         services.AddSingleton<IModelCooldownCache, ModelCooldownCache>();
+        services.AddSingleton<ILocalClaudeHealthCache, LocalClaudeHealthCache>();
 
         // Register orchestrator
         services.AddScoped<IProviderOrchestrator, ProviderOrchestrator>();
@@ -88,6 +90,7 @@ public static class DependencyInjection
         services.AddScoped<IBackgroundJobService, BackgroundJobService>();
         services.AddScoped<IProviderBenchmarkJob, ProviderBenchmarkJob>();
         services.AddScoped<IModelValidationJob, ModelValidationJob>();
+        services.AddScoped<ILocalClaudeHealthJob, LocalClaudeHealthJob>();
 
         // Notifications
         services.AddSingleton<IEmailSender, SmtpEmailSender>();

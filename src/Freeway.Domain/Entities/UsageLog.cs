@@ -38,6 +38,12 @@ public class UsageLog : BaseEntity
 
     /// <summary>The endpoint that actually served the request behind an aggregator.</summary>
     public string? UpstreamProvider { get; set; }
+
+    /// <summary>
+    /// List price avoided by serving this out of a subscription rather than a paid
+    /// provider. Null for anything that was actually billed.
+    /// </summary>
+    public decimal? AvoidedCostUsd { get; set; }
     public List<ChatMessage>? RequestMessages { get; set; }
     public string? ResponseContent { get; set; }
     public string? FinishReason { get; set; }

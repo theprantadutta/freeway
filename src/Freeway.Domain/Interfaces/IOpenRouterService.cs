@@ -80,6 +80,12 @@ public class ChatCompletionResult
     public string? UpstreamProvider { get; set; }
 
     /// <summary>
+    /// What this request would have cost had it gone to a paid provider, for work
+    /// served out of a subscription instead. Money not spent, not money spent.
+    /// </summary>
+    public decimal? AvoidedCostUsd { get; set; }
+
+    /// <summary>
     /// How CostUsd was arrived at: "provider" (billed amount), "free_tier"
     /// (a provider's own free tier, genuinely zero), or "estimated".
     /// </summary>

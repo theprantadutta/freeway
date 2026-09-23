@@ -114,6 +114,15 @@ public class WeeklyUsageReport
 
     public OpenRouterCredit? Credit { get; set; }
 
+    /// <summary>Requests served out of the local Claude subscription, at no charge.</summary>
+    public int LocalClaudeRequests { get; set; }
+
+    /// <summary>List price those requests would have cost on a paid provider.</summary>
+    public decimal LocalClaudeAvoidedUsd { get; set; }
+
+    /// <summary>Current verdict on the local route, so a quiet week is explicable.</summary>
+    public string? LocalClaudeStatus { get; set; }
+
     public bool HadTraffic => ThisWeek.Requests > 0;
 
     /// <summary>Week-over-week cost change. Null when there is no prior week to compare.</summary>

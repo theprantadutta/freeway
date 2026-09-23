@@ -18,15 +18,18 @@ public class UsageReportBuilder : IUsageReportBuilder
 {
     private readonly AppDbContext _context;
     private readonly IOpenRouterService _openRouterService;
+    private readonly ILocalClaudeService _localClaude;
     private readonly ILogger<UsageReportBuilder> _logger;
 
     public UsageReportBuilder(
         AppDbContext context,
         IOpenRouterService openRouterService,
+        ILocalClaudeService localClaude,
         ILogger<UsageReportBuilder> logger)
     {
         _context = context;
         _openRouterService = openRouterService;
+        _localClaude = localClaude;
         _logger = logger;
     }
 
@@ -60,6 +63,7 @@ public class UsageReportBuilder : IUsageReportBuilder
                 ModelType = u.ModelType,
                 ModelTier = u.ModelTier,
                 CostSource = u.CostSource,
+                AvoidedCostUsd = u.AvoidedCostUsd,
                 InputTokens = u.InputTokens,
                 OutputTokens = u.OutputTokens,
                 CostUsd = u.CostUsd,
@@ -111,6 +115,11 @@ public class UsageReportBuilder : IUsageReportBuilder
             })
             .OrderByDescending(m => m.Requests)
             .ToList();
+
+        var localRows = weekLogs.Where(l => l.CostSource == "subscription").ToList();
+        report.LocalClaudeRequests = localRows.Count;
+        report.LocalClaudeAvoidedUsd = localRows.Sum(l => l.AvoidedCostUsd ?? 0m);
+        report.LocalClaudeStatus = _localClaude.IsConfigured ? _localClaude.Health.Describe() : null;
 
         report.CostSources = weekLogs
             .GroupBy(l => l.CostSource ?? "legacy")
@@ -204,6 +213,7 @@ public class UsageReportBuilder : IUsageReportBuilder
         public string ModelType { get; set; } = string.Empty;
         public string? ModelTier { get; set; }
         public string? CostSource { get; set; }
+        public decimal? AvoidedCostUsd { get; set; }
         public int InputTokens { get; set; }
         public int OutputTokens { get; set; }
         public decimal CostUsd { get; set; }

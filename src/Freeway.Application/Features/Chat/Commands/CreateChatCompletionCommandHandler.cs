@@ -17,6 +17,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
     private readonly IModelCacheService _modelCacheService;
     private readonly IProviderModelCache _providerModelCache;
     private readonly IModelCooldownCache _modelCooldownCache;
+    private readonly ILocalClaudeService _localClaude;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDateTimeService _dateTimeService;
     private readonly ILogger<CreateChatCompletionCommandHandler> _logger;
@@ -27,6 +28,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         IModelCacheService modelCacheService,
         IProviderModelCache providerModelCache,
         IModelCooldownCache modelCooldownCache,
+        ILocalClaudeService localClaude,
         IServiceScopeFactory scopeFactory,
         IDateTimeService dateTimeService,
         ILogger<CreateChatCompletionCommandHandler> logger)
@@ -36,6 +38,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         _modelCacheService = modelCacheService;
         _providerModelCache = providerModelCache;
         _modelCooldownCache = modelCooldownCache;
+        _localClaude = localClaude;
         _scopeFactory = scopeFactory;
         _dateTimeService = dateTimeService;
         _logger = logger;
@@ -100,6 +103,36 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             modelType = resolved.ModelType;
             modelTier = resolved.Tier?.ToSlug();
 
+            // Premium can be served from a local Claude Code subscription at no
+            // charge. It is strictly an optimisation: anything at all wrong with it
+            // and the request carries on to the paid chain below, with the reason in
+            // the log. Only this lane is eligible.
+            if (resolved.Tier == PaidTier.Premium && _localClaude.IsConfigured)
+            {
+                var health = _localClaude.Health;
+                if (health.CanServe)
+                {
+                    var local = await _localClaude.CompleteAsync(messages, options, cancellationToken);
+                    if (local.Success)
+                    {
+                        _ = Task.Run(() => LogUsageInBackgroundAsync(
+                            request, local.Model, modelType, modelTier, null, local));
+
+                        return Result<ChatCompletionResponseDto>.Success(ToDto(local));
+                    }
+
+                    _logger.LogWarning(
+                        "Premium request could not use local Claude ({Reason}); using a paid model instead",
+                        local.ErrorMessage);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Premium request skipped local Claude ({Status}); using a paid model instead",
+                        health.Describe());
+                }
+            }
+
             // Build an ordered candidate list. For the "paid"/"paid:<tier>"/"image" virtual
             // models we include backup models so one rate-limited/failing model does not fail
             // the whole request. Specific model IDs keep single-attempt semantics.
@@ -122,30 +155,32 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             return Result<ChatCompletionResponseDto>.BadGateway(result.ErrorMessage ?? "API error");
         }
 
-        return Result<ChatCompletionResponseDto>.Success(new ChatCompletionResponseDto
-        {
-            Id = result.Id,
-            Object = "chat.completion",
-            Created = result.Created,
-            Model = result.Model,
-            Choices = result.Choices.Select(c => new ChatChoiceDto
-            {
-                Index = c.Index,
-                Message = new ChatMessageDto
-                {
-                    Role = c.Message.Role,
-                    Content = c.Message.Content
-                },
-                FinishReason = c.FinishReason
-            }).ToList(),
-            Usage = new UsageDto
-            {
-                PromptTokens = result.Usage.PromptTokens,
-                CompletionTokens = result.Usage.CompletionTokens,
-                TotalTokens = result.Usage.TotalTokens
-            }
-        });
+        return Result<ChatCompletionResponseDto>.Success(ToDto(result));
     }
+
+    private static ChatCompletionResponseDto ToDto(ChatCompletionResult result) => new()
+    {
+        Id = result.Id,
+        Object = "chat.completion",
+        Created = result.Created,
+        Model = result.Model,
+        Choices = result.Choices.Select(c => new ChatChoiceDto
+        {
+            Index = c.Index,
+            Message = new ChatMessageDto
+            {
+                Role = c.Message.Role,
+                Content = c.Message.Content
+            },
+            FinishReason = c.FinishReason
+        }).ToList(),
+        Usage = new UsageDto
+        {
+            PromptTokens = result.Usage.PromptTokens,
+            CompletionTokens = result.Usage.CompletionTokens,
+            TotalTokens = result.Usage.TotalTokens
+        }
+    };
 
     // Number of backup models to try after the primary for "paid"/"image" virtual models.
     private static readonly int PaidFallbackCount =
@@ -403,6 +438,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
                 Provider = result.ProviderName ?? "openrouter",
                 CostSource = costSource,
                 UpstreamProvider = result.UpstreamProvider,
+                AvoidedCostUsd = result.AvoidedCostUsd,
                 RequestMessages = request.Messages.Select(m => new ChatMessage
                 {
                     Role = m.Role,

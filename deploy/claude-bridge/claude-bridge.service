@@ -1,0 +1,48 @@
+# Runs the Claude Code bridge as the user that owns ~/.claude.
+#
+# Install:
+#   sudo cp server.js /opt/claude-bridge/server.js
+#   sudo cp claude-bridge.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now claude-bridge
+#
+# Edit User= and the Environment= lines before enabling.
+
+[Unit]
+Description=Claude Code bridge for Freeway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Must be the user whose ~/.claude holds the Claude Code credentials.
+User=ubuntu
+WorkingDirectory=/opt/claude-bridge
+
+# Bind to the docker bridge address only, so this is not exposed to the internet.
+# 172.17.0.1 is the default docker0 gateway; check yours with `ip addr show docker0`.
+Environment=BRIDGE_HOST=172.17.0.1
+Environment=BRIDGE_PORT=8787
+
+# Shared secret. Must match LOCAL_CLAUDE_TOKEN in the Freeway .env.
+Environment=BRIDGE_TOKEN=change-me-to-a-long-random-string
+
+# One at a time: Claude Code is an interactive tool, not a server.
+Environment=BRIDGE_MAX_CONCURRENT=1
+Environment=BRIDGE_TIMEOUT_MS=120000
+Environment=BRIDGE_HEALTH_TTL_MS=600000
+Environment=BRIDGE_WORKDIR=/tmp
+
+# If claude is not on the service PATH, set its absolute path here.
+# Environment=CLAUDE_BIN=/home/ubuntu/.local/bin/claude
+
+ExecStart=/usr/bin/env node /opt/claude-bridge/server.js
+Restart=on-failure
+RestartSec=10
+
+# It only needs to run one binary and talk to the network.
+NoNewPrivileges=true
+PrivateTmp=false
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
