@@ -11,6 +11,16 @@ public class ChatCompletionRequestDto
     public double? PresencePenalty { get; set; }
     public List<string>? Stop { get; set; }
     public bool Stream { get; set; }
+
+    /// <summary>
+    /// Serve this request from the local Claude Code subscription or not at all.
+    ///
+    /// The lane routing normally treats local Claude as an optimisation and falls
+    /// through to a paid model whenever it cannot be used. This turns that off: the
+    /// request either runs on the subscription or fails, and never quietly costs
+    /// money. Sent as "use_local_only".
+    /// </summary>
+    public bool UseLocalOnly { get; set; }
 }
 
 public class ChatCompletionResponseDto

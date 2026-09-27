@@ -25,7 +25,7 @@ Freeway is a full-featured AI Gateway built with .NET 10 that:
 - **Daily Refresh**: Models updated via Hangfire background jobs
 - **Weekly Email Report**: Usage, cost and per-project breakdown emailed to the admin
 - **Spend Alerts**: Email when a project, model or the gateway overspends, or OpenRouter credit runs low
-- **Local Claude Code** (optional): Serve `paid:premium` from a host Claude Code subscription at no charge, falling back to a paid model whenever it is unavailable
+- **Local Claude Code** (optional): Serve `paid:premium` from a host Claude Code subscription at no charge, with `paid:moderate` riding along on spare capacity, under a configurable hourly token budget. Falls back to a paid model whenever it is unavailable, or set `use_local_only` to fail instead
 - **PostgreSQL Storage**: Persistent storage for projects, users, and usage data
 - **Web Control Panel**: Next.js 16 dashboard with JWT authentication
 - **Docker Ready**: Includes Dockerfile and compose.yml with Traefik support
@@ -96,6 +96,20 @@ OpenAI-compatible chat completion endpoint.
   ],
   "temperature": 0.7,
   "max_tokens": 1000
+}
+```
+
+**Extra parameters (beyond the OpenAI shape):**
+
+| field | type | meaning |
+|---|---|---|
+| `use_local_only` | bool | Serve from the local Claude Code subscription or fail. Never falls back to a paid model, so the request cannot quietly cost money. `503` if the subscription is unavailable, throttled or out of hourly budget; `400` for image models, which it cannot generate. |
+
+```json
+{
+  "model": "paid:premium",
+  "messages": [{"role": "user", "content": "Hello!"}],
+  "use_local_only": true
 }
 ```
 
@@ -324,7 +338,10 @@ Environment variables (see `.env.example`):
 | `ALERT_OPENROUTER_KEY_EXPIRY_DAYS` | No | Warn this many days before key expiry (default: 14) |
 | `CREDENTIAL_ALERTS_ENABLED` | No | Alert when any provider rejects its API key (default: true) |
 | `FREE_LANE_OPENROUTER_COUNT` | No | Zero-cost OpenRouter models the free lane may try (default: 3, 0 disables) |
-| `LOCAL_CLAUDE_ENABLED` | No | Serve `paid:premium` from a local Claude Code subscription (default: false) |
+| `LOCAL_CLAUDE_ENABLED` | No | Serve `paid:premium` and `paid:moderate` from a local Claude Code subscription (default: false) |
+| `LOCAL_CLAUDE_SPILLOVER_TIMEOUT_SECONDS` | No | How long `paid:moderate` waits before using a paid model instead (default: 5) |
+| `BRIDGE_HOURLY_TOKEN_BUDGET` | No | Tokens the bridge may spend per rolling hour. Set, not discovered: the CLI reports no limit (default: 200000) |
+| `BRIDGE_SPILLOVER_SHARE` | No | Share of that budget `paid:moderate` may use; the rest is premium's reserve (default: 0.6) |
 | `CLAUDE_HOME` | No | Home directory holding `.claude` and `.claude.json` to mount (default: `/home/ubuntu`) |
 | `CLAUDE_UID` / `CLAUDE_GID` | No | uid/gid owning those files (default: 1000) |
 | `LOCAL_CLAUDE_URL` | No | Bridge address (default: `http://claude-bridge:8787`) |
@@ -570,8 +587,41 @@ Premium request could not use local Claude (exit 1: usage limit reached); using 
 Premium request skipped local Claude (rate limited: ...); using a paid model instead
 ```
 
-Only `paid:premium` is eligible. `free`, `paid:low`, `paid:moderate` and `image` are
-untouched.
+Two lanes are eligible, on deliberately different terms:
+
+| | `paid:premium` | `paid:moderate` |
+|---|---|---|
+| queues when the bridge is busy | yes | **never** |
+| deadline | 150s | 5s |
+| share of the hourly budget | all of it | 60% |
+
+Premium displaces frontier-model pricing, so a request served there avoids around
+$0.025; moderate displaces models costing a fraction of a cent. Both consume the same
+subscription quota, so premium is worth roughly 25x more per unit of the scarce
+resource and is never made to wait behind the cheaper lane. Moderate rides along on
+capacity that would otherwise sit idle and is refused the instant that is in
+question, which keeps it from ever turning into latency.
+
+`free`, `paid:low` and `image` are untouched.
+
+### Demanding it: `use_local_only`
+
+Setting `use_local_only: true` inverts the contract. Everywhere else the subscription
+is an optimisation and a paid model is the safety net; here there is no net, and the
+request either runs on the subscription or returns `503`.
+
+```bash
+curl -X POST https://freeway.example.com/chat/completions   -H "Authorization: Bearer $FREEWAY_KEY"   -H "Content-Type: application/json"   -d '{"model":"paid:premium","messages":[{"role":"user","content":"Hi"}],"use_local_only":true}'
+```
+
+It runs at premium priority whatever lane is named -- an explicit caller has accepted
+that it may fail, so refusing instantly the way spillover does would answer the wrong
+question -- but it is still subject to the hourly budget. That budget exists to stop
+the subscription being spent faster than it refills, and asking explicitly is not a
+reason to overrun it.
+
+Use it for work that is worth waiting for but not worth paying for: batch jobs,
+backfills, anything where an error is a better outcome than a bill.
 
 ### What it actually costs
 

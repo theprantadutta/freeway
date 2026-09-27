@@ -81,6 +81,15 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         string? modelTier = null;
         CachedModel? model = null;
 
+        // use_local_only turns the usual contract inside out. Everywhere else the
+        // local subscription is an optimisation and a paid model is the safety net;
+        // here the caller has said they would rather have an error than a bill, so
+        // there is no net and every failure surfaces instead of being absorbed.
+        if (request.UseLocalOnly)
+        {
+            return await HandleLocalOnlyAsync(request, messages, options, cancellationToken);
+        }
+
         // Use orchestrator for "free" requests, direct OpenRouter for "paid" or specific models
         if (request.Model.Equals("free", StringComparison.OrdinalIgnoreCase))
         {
@@ -214,6 +223,92 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
     /// tier's chain as backups. Specific model IDs resolve to a single candidate (no silent
     /// substitution).
     /// </summary>
+    /// <summary>
+    /// The model_type and model_tier a request should be recorded under, without
+    /// resolving it to an actual callable model.
+    /// </summary>
+    private (string ModelType, string? ModelTier) DescribeLane(string requestedModel)
+    {
+        if (requestedModel.Equals("free", StringComparison.OrdinalIgnoreCase))
+        {
+            return ("free", null);
+        }
+
+        var resolved = ResolveModel(requestedModel);
+        return resolved.Error is null
+            ? (resolved.ModelType, resolved.Tier?.ToSlug())
+            : ("paid", null);
+    }
+
+    /// <summary>
+    /// Serves a request that asked for the local subscription and nothing else.
+    ///
+    /// Runs at premium priority whatever lane was named: the caller has asked for
+    /// this explicitly and accepted that it may fail, so refusing instantly the way
+    /// spillover does would be the wrong answer to the wrong question. It waits, and
+    /// it may use the whole hourly budget -- but it does not get to ignore that
+    /// budget, which exists to stop the subscription being spent faster than it
+    /// refills, and which an explicit caller has no more right to overrun than
+    /// anyone else.
+    /// </summary>
+    private async Task<Result<ChatCompletionResponseDto>> HandleLocalOnlyAsync(
+        CreateChatCompletionCommand request,
+        List<ChatMessage> messages,
+        ChatCompletionOptions options,
+        CancellationToken cancellationToken)
+    {
+        // Image generation is the one thing the subscription genuinely cannot do, so
+        // say so as a bad request rather than letting it fail as if it were a
+        // capacity problem the caller could retry out of.
+        if (request.Model.StartsWith("image", StringComparison.OrdinalIgnoreCase))
+        {
+            return Result<ChatCompletionResponseDto>.Failure(
+                "use_local_only cannot serve image models: local Claude Code generates text only.", 400);
+        }
+
+        if (!_localClaude.IsConfigured)
+        {
+            return Result<ChatCompletionResponseDto>.ServiceUnavailable(
+                "use_local_only was requested but local Claude is not enabled on this gateway.");
+        }
+
+        var health = _localClaude.Health;
+        if (!health.CanServe)
+        {
+            _logger.LogInformation(
+                "Local-only request refused: local Claude is {Status}", health.Describe());
+
+            return Result<ChatCompletionResponseDto>.ServiceUnavailable(
+                $"use_local_only was requested but local Claude is {health.Describe()}.");
+        }
+
+        var local = await _localClaude.CompleteAsync(
+            messages, options, LocalClaudePriority.Premium, cancellationToken);
+
+        // Recorded under the lane that was asked for, not under a type of its own.
+        // Which backend served it is already carried by cost_source; inventing a
+        // "local" model type here would drop these rows out of the lane breakdown
+        // the dashboard and the weekly report are built on.
+        var (loggedType, loggedTier) = DescribeLane(request.Model);
+
+        // Logged either way. A local-only request that failed still belongs in the
+        // project's history, or the analytics would show traffic simply vanishing.
+        _ = Task.Run(() => LogUsageInBackgroundAsync(
+            request, local.Model ?? "claude-code", loggedType, loggedTier, null, local));
+
+        if (!local.Success)
+        {
+            _logger.LogWarning(
+                "Local-only request failed and has no fallback by design ({Reason})",
+                local.ErrorMessage);
+
+            return Result<ChatCompletionResponseDto>.ServiceUnavailable(
+                local.ErrorMessage ?? "local Claude could not serve this request.");
+        }
+
+        return Result<ChatCompletionResponseDto>.Success(ToDto(local));
+    }
+
     /// <summary>
     /// What this request would have cost had it gone to a paid model, using the
     /// model it would actually have reached first and the tokens it actually used.
