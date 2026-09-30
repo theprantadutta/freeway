@@ -75,6 +75,16 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             Stream = request.Stream
         };
 
+        // Accepted in the request shape for OpenAI compatibility, but never
+        // implemented: the flag was being forwarded upstream while the response was
+        // still parsed as a single JSON body, so asking for it produced a broken
+        // reply rather than a stream. Saying so is better than half-honouring it.
+        if (request.Stream)
+        {
+            return Result<ChatCompletionResponseDto>.Failure(
+                "Streaming is not supported by this gateway. Omit \"stream\" or set it to false.", 400);
+        }
+
         ChatCompletionResult result;
         string modelId;
         string modelType;

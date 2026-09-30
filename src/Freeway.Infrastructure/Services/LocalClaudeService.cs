@@ -173,16 +173,23 @@ public class LocalClaudeService : ILocalClaudeService
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/complete");
             if (!string.IsNullOrWhiteSpace(_token))
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+            var deadlineSeconds = spillover ? _spilloverTimeoutSeconds : _timeoutSeconds;
+
             request.Content = JsonContent.Create(new
             {
                 messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToList(),
                 maxTokens = options?.MaxTokens,
-                priority = spillover ? "spillover" : "premium"
+                priority = spillover ? "spillover" : "premium",
+
+                // The bridge measures how long calls take on its own host and refuses
+                // work it cannot finish in time, rather than starting something this
+                // side will abandon. Without it a slow host turns every spillover
+                // attempt into the deadline added to a paid call.
+                deadlineMs = deadlineSeconds * 1000
             });
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromSeconds(
-                spillover ? _spilloverTimeoutSeconds : _timeoutSeconds));
+            cts.CancelAfter(TimeSpan.FromSeconds(deadlineSeconds));
 
             var response = await _httpClient.SendAsync(request, cts.Token);
             var body = await response.Content.ReadAsStringAsync(cts.Token);
@@ -227,6 +234,9 @@ public class LocalClaudeService : ILocalClaudeService
                 parsed.Model ?? "unknown", parsed.DurationMs ?? stopwatch.ElapsedMilliseconds,
                 parsed.PromptTokens, parsed.CompletionTokens);
 
+            var (text, completionTokens, finishReason) = ApplyTokenLimit(
+                parsed.Text ?? "", parsed.CompletionTokens, options?.MaxTokens, parsed.StopReason);
+
             return new ChatCompletionResult
             {
                 Id = $"chatcmpl-local-{Guid.NewGuid():N}",
@@ -237,17 +247,17 @@ public class LocalClaudeService : ILocalClaudeService
                     new ChatCompletionChoice
                     {
                         Index = 0,
-                        Message = new ChatMessage { Role = "assistant", Content = parsed.Text ?? "" },
-                        FinishReason = parsed.StopReason ?? "stop"
+                        Message = new ChatMessage { Role = "assistant", Content = text },
+                        FinishReason = finishReason
                     }
                 ],
                 Usage = new ChatCompletionUsage
                 {
                     PromptTokens = parsed.PromptTokens,
-                    CompletionTokens = parsed.CompletionTokens,
-                    TotalTokens = parsed.PromptTokens + parsed.CompletionTokens
+                    CompletionTokens = completionTokens,
+                    TotalTokens = parsed.PromptTokens + completionTokens
                 },
-                FinishReason = parsed.StopReason ?? "stop",
+                FinishReason = finishReason,
                 Success = true,
                 ProviderName = "claude-code",
                 UpstreamProvider = parsed.Model,
@@ -282,6 +292,43 @@ public class LocalClaudeService : ILocalClaudeService
 
             return Failed($"could not reach the bridge: {ex.Message}", stopwatch, spillover);
         }
+    }
+
+    /// <summary>
+    /// Honours max_tokens on the local path, which the CLI cannot be relied on to do
+    /// itself.
+    ///
+    /// The bridge passes the cap to Claude Code as an environment variable, but that
+    /// was measured truncating at small values and being ignored at larger ones, so
+    /// the contract is kept here instead: an over-long answer is cut and reported as
+    /// finish_reason "length", exactly as a paid provider would report it. Callers
+    /// asking for a bounded answer get one from every lane, not just the paid ones.
+    ///
+    /// Cutting after the fact does not save the tokens -- they were already generated
+    /// and already charged against the hourly budget. Only the environment variable
+    /// can do that, and only when Claude Code honours it.
+    /// </summary>
+    private static (string Text, int CompletionTokens, string FinishReason) ApplyTokenLimit(
+        string text,
+        int completionTokens,
+        int? maxTokens,
+        string? stopReason)
+    {
+        var finish = stopReason ?? "stop";
+
+        if (maxTokens is not > 0 || completionTokens <= maxTokens || text.Length == 0)
+        {
+            return (text, completionTokens, finish);
+        }
+
+        // Cut by the share of the answer the caller allowed for. Characters are a
+        // proxy for tokens, which is approximate by nature -- the alternative is a
+        // tokeniser the gateway does not otherwise need, for a path that is already
+        // best-effort.
+        var keep = (int)Math.Floor(text.Length * (maxTokens.Value / (double)completionTokens));
+        keep = Math.Clamp(keep, 1, text.Length);
+
+        return (text[..keep], maxTokens.Value, "length");
     }
 
     private ChatCompletionResult Failed(

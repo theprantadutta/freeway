@@ -184,7 +184,20 @@ public class AdminController : BaseApiController
             detail = health.Detail,
             latency_ms = health.LatencyMs,
             model = health.Model,
-            checked_at = health.CheckedAt
+            checked_at = health.CheckedAt,
+
+            // The hourly budget is configured rather than discovered, so the only way
+            // to tell whether it is set sensibly is to watch what it actually spends.
+            busy = health.Busy,
+            budget = health.Budget is null ? null : new
+            {
+                limit = health.Budget.Limit,
+                used = health.Budget.Used,
+                remaining = health.Budget.Remaining,
+                spillover_limit = health.Budget.SpilloverLimit,
+                used_percent = Math.Round(health.Budget.UsedPercent, 1),
+                per_call_estimate = health.Budget.Estimate
+            }
         });
     }
 

@@ -103,6 +103,7 @@ OpenAI-compatible chat completion endpoint.
 
 | field | type | meaning |
 |---|---|---|
+| `stream` | bool | **Not supported.** Sending `true` returns `400`. It used to be forwarded upstream while the reply was still parsed as one JSON body, which produced a broken response rather than a stream. |
 | `use_local_only` | bool | Serve from the local Claude Code subscription or fail. Never falls back to a paid model, so the request cannot quietly cost money. `503` if the subscription is unavailable, throttled or out of hourly budget; `400` for image models, which it cannot generate. |
 
 ```json
@@ -340,7 +341,7 @@ Environment variables (see `.env.example`):
 | `FREE_LANE_OPENROUTER_COUNT` | No | Zero-cost OpenRouter models the free lane may try (default: 3, 0 disables) |
 | `LOCAL_CLAUDE_ENABLED` | No | Serve `paid:premium` and `paid:moderate` from a local Claude Code subscription (default: false) |
 | `LOCAL_CLAUDE_SPILLOVER_TIMEOUT_SECONDS` | No | How long `paid:moderate` waits before using a paid model instead (default: 5) |
-| `BRIDGE_HOURLY_TOKEN_BUDGET` | No | Tokens the bridge may spend per rolling hour. Set, not discovered: the CLI reports no limit (default: 200000) |
+| `BRIDGE_HOURLY_TOKEN_BUDGET` | No | Tokens the bridge may spend per rolling hour. Set, not discovered: the CLI reports no limit (default: 500000) |
 | `BRIDGE_SPILLOVER_SHARE` | No | Share of that budget `paid:moderate` may use; the rest is premium's reserve (default: 0.6) |
 | `CLAUDE_HOME` | No | Home directory holding `.claude` and `.claude.json` to mount (default: `/home/ubuntu`) |
 | `CLAUDE_UID` / `CLAUDE_GID` | No | uid/gid owning those files (default: 1000) |
