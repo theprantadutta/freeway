@@ -15,5 +15,6 @@ public record CreateChatCompletionCommand(
     double? PresencePenalty = null,
     List<string>? Stop = null,
     bool Stream = false,
-    bool UseLocalOnly = false
+    bool UseLocalOnly = false,
+    ReasoningOptionsDto? Reasoning = null
 ) : IRequest<Result<ChatCompletionResponseDto>>;

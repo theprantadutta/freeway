@@ -24,7 +24,8 @@ public class ChatController : BaseApiController
             PresencePenalty: request.PresencePenalty,
             Stop: request.Stop,
             Stream: request.Stream,
-            UseLocalOnly: request.UseLocalOnly
+            UseLocalOnly: request.UseLocalOnly,
+            Reasoning: request.Reasoning
         );
 
         var result = await Mediator.Send(command);

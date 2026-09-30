@@ -188,7 +188,13 @@ public class OpenRouterService : IOpenRouterService
                 // Makes the response carry usage.cost: the amount actually billed.
                 // Without this we can only multiply tokens by a cached headline
                 // price, which provider routing can make wrong.
-                Usage = new OpenRouterUsagePreference { Include = true }
+                Usage = new OpenRouterUsagePreference { Include = true },
+
+                // Passed straight through. Reasoning is billed as output, so on a
+                // thinking model this is often the largest lever a caller has, and
+                // models that do not reason ignore it rather than failing -- which
+                // matters, because a tier's fallback chain mixes the two.
+                Reasoning = options?.Reasoning
             };
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
@@ -300,6 +306,9 @@ public class OpenRouterService : IOpenRouterService
         public bool Stream { get; set; }
         public OpenRouterProviderPreferences? Provider { get; set; }
         public OpenRouterUsagePreference? Usage { get; set; }
+
+        /// <summary>Omitted entirely when the caller said nothing, so defaults stand.</summary>
+        public ReasoningOptions? Reasoning { get; set; }
     }
 
     private class OpenRouterUsagePreference
