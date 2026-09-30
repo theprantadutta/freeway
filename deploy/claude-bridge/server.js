@@ -38,7 +38,7 @@ const WORKDIR = process.env.BRIDGE_WORKDIR || "/tmp";
  * this prints and raise it if there is headroom; the reactive guard is separate and
  * still there, since a genuine rate-limit reply marks the bridge unavailable.
  */
-const HOURLY_TOKEN_BUDGET = Number(process.env.BRIDGE_HOURLY_TOKEN_BUDGET || 200000);
+const HOURLY_TOKEN_BUDGET = Number(process.env.BRIDGE_HOURLY_TOKEN_BUDGET || 500000);
 
 /**
  * The share of that budget spillover traffic may use, leaving the rest for premium.
@@ -90,8 +90,23 @@ function budget() {
   };
 }
 
-function record(tokens) {
-  ledger.push({ at: Date.now(), tokens });
+function record(tokens, durationMs) {
+  ledger.push({ at: Date.now(), tokens, durationMs });
+}
+
+/**
+ * How long a call takes on this host, from the calls this host has actually made.
+ *
+ * It matters because the deadline a caller can offer is fixed while the machine is
+ * not: the same bridge answers in about 3.5s on a laptop and about 11s on the
+ * production VPS. Guessing at build time gets one of those wrong, so nothing guesses.
+ */
+function typicalDurationMs() {
+  const timed = ledger.filter((e) => e.durationMs > 0).slice(-10);
+  if (!timed.length) return null;
+
+  const sorted = timed.map((e) => e.durationMs).sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
 }
 
 /**
@@ -102,12 +117,26 @@ function record(tokens) {
  * instantaneous and the caller falls straight through to a paid model, which is the
  * whole point: spillover must never turn into latency.
  */
-function admit(priority) {
+function admit(priority, deadlineMs) {
   const b = budget();
 
   if (priority === "spillover") {
     if (inFlight > 0 || waiting.length > 0) {
       return { ok: false, reasonCode: "busy", reason: "bridge busy; spillover does not queue" };
+    }
+
+    // Refuse work this host cannot finish in the time offered. Starting it anyway is
+    // the worst of every option: the caller gives up at its deadline and pays for a
+    // paid model on top, while the call it abandoned keeps running here, holding the
+    // one slot and spending the budget premium needs, to produce an answer nobody
+    // will ever read.
+    const typical = typicalDurationMs();
+    if (deadlineMs && typical && typical > deadlineMs) {
+      return {
+        ok: false,
+        reasonCode: "too_slow",
+        reason: `calls here take about ${typical}ms; the caller allowed ${deadlineMs}ms`,
+      };
     }
     if (b.used + b.estimate > b.spilloverLimit) {
       return {
@@ -237,16 +266,29 @@ ${stderr}`;
   return `exit ${code}: ${text.slice(0, 300) || "no output"}`;
 }
 
-function runClaude(prompt, systemPrompt) {
+function runClaude(prompt, systemPrompt, { onChild } = {}) {
   return new Promise((resolve) => {
     const started = Date.now();
     let child;
     try {
       child = spawn(CLAUDE_BIN, buildArgs(systemPrompt), {
         cwd: WORKDIR,
+
+        // CLAUDE_CODE_MAX_OUTPUT_TOKENS is deliberately NOT set here, though it is
+        // the obvious way to honour a caller's max_tokens. Measured: the CLI does not
+        // truncate at that limit, it fails the whole call --
+        //
+        //   API Error: Claude's response exceeded the 30 output token maximum
+        //
+        // which throws away a prompt of ~9.3k tokens that has already been charged
+        // against the hourly budget, and sends the request to a paid model anyway.
+        // A cap that is usually harmless and occasionally destroys the call is worse
+        // than no cap, so the limit is applied to the response instead, in
+        // LocalClaudeService.ApplyTokenLimit.
         env: process.env,
         stdio: ["pipe", "pipe", "pipe"],
       });
+      if (onChild) onChild(child);
     } catch (err) {
       return resolve({ ok: false, reason: `spawn failed: ${err.message}` });
     }
@@ -314,7 +356,7 @@ function runClaude(prompt, systemPrompt) {
       // the same subscription, and a budget that ignored them would drift.
       const spent =
         (usage.input_tokens || 0) + created + read + (usage.output_tokens || 0);
-      record(spent);
+      record(spent, durationMs);
       console.log(
         `claude ok in ${durationMs}ms, cache created=${created} read=${read}, $${(parsed.total_cost_usd ?? 0).toFixed(6)} list`
       );
@@ -475,7 +517,7 @@ const server = http.createServer(async (req, res) => {
 
     // Checked before the queue, never inside it: a refused spillover call has to come
     // back immediately so the caller can use a paid model, rather than waiting.
-    const verdict = admit(priority);
+    const verdict = admit(priority, Number(body.deadlineMs) || 0);
     if (!verdict.ok) {
       console.log(`${priority} refused: ${verdict.reason}`);
       return send(res, 200, { ok: false, reason: verdict.reason, reasonCode: verdict.reasonCode });
@@ -484,13 +526,36 @@ const server = http.createServer(async (req, res) => {
     const { system, prompt } = render(messages);
 
     await acquire();
+    let child = null;
+    let abandoned = false;
+
+    // If the caller gives up -- a spillover deadline, a dropped connection -- the work
+    // stops here too. Letting it run on would hold the one slot and spend the hourly
+    // budget on an answer with nobody left to receive it, which is how a cheap lane
+    // ends up starving the expensive one.
+    const onClose = () => {
+      if (child && child.exitCode === null) {
+        abandoned = true;
+        console.log(`${priority} abandoned by caller; stopping the call`);
+        child.kill("SIGKILL");
+      }
+    };
+    req.on("aborted", onClose);
+    res.on("close", onClose);
+
     try {
-      const result = await runClaude(prompt, system);
+      const result = await runClaude(prompt, system, { onChild: (c) => { child = c; } });
+
+      if (abandoned) return;
+
       // A refusal to serve invalidates the cached "available" verdict straight away,
-      // so the next request does not keep trying a route that just failed.
+      // so the next request does not keep trying a route that just failed. An
+      // abandoned call is not evidence of anything, so it is excluded above.
       if (!result.ok) cachedHealth = null;
       return send(res, 200, result);
     } finally {
+      req.off("aborted", onClose);
+      res.off("close", onClose);
       release();
     }
   }

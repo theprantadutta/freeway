@@ -80,6 +80,21 @@ the cheaper lane. Moderate rides along on capacity that would otherwise sit idle
 and the moment that capacity is in question it is refused and the request goes to
 the model it would have used anyway.
 
+Spillover is also refused when this host cannot finish in the time the caller
+allowed. The bridge times its own calls and compares the median against the
+`deadlineMs` on the request, because the same bridge answers in about 3.5s on a
+laptop and about 11s on a small VPS -- a deadline that is generous on one is
+impossible on the other, and only the host knows which it is.
+
+That check matters more than it looks. Starting work that will be abandoned is the
+worst available outcome: the caller gives up and pays for a paid model anyway, while
+the call it walked away from keeps running here, holding the one slot and spending
+the budget premium needs, to produce an answer nobody will read. Measured in
+production before this existed, it added about five seconds to 93% of moderate
+requests and starved premium of budget at peak.
+
+For the same reason the bridge now stops the CLI when the caller disconnects.
+
 Refusals are instantaneous and happen before the queue, so spillover can never turn
 into latency. They come back with `reasonCode` of `busy` or `budget`, which the
 caller treats as the bridge working rather than failing -- a refused spillover must
@@ -93,7 +108,7 @@ configured, because the ceiling cannot be read: the CLI reports what a call used
 carries no rate, limit, remaining or reset field anywhere in its output. There is
 nothing to query.
 
-At roughly 9.4k tokens a call, the 200,000 default is about 21 calls an hour, of
+At roughly 9.4k tokens a call, the 500,000 default is about 53 calls an hour, of
 which moderate may have 12. Probes count against it too -- they are real calls on
 the same subscription. `GET /admin/local-claude` reports where the hour stands, and
 every invocation logs its own consumption, so size it from observed numbers rather
@@ -195,7 +210,14 @@ curl -s -H "Authorization: Bearer $BRIDGE_TOKEN" http://172.17.0.1:8787/health
 | `POST` | `/complete` | `{ ok, text, model, listCostUsd, promptTokens, completionTokens, durationMs }` |
 
 `/complete` takes an optional `priority` of `premium` (the default, so a caller that
-sends nothing keeps the old behaviour) or `spillover`. `/health` additionally reports
+sends nothing keeps the old behaviour) or `spillover`, and an optional `deadlineMs`
+the bridge uses to refuse work it cannot finish in time.
+
+It does not honour `max_tokens`, and deliberately so. The obvious mechanism,
+`CLAUDE_CODE_MAX_OUTPUT_TOKENS`, does not truncate -- it fails the entire call with
+`API Error: Claude's response exceeded the N output token maximum`, discarding a
+~9.3k-token prompt already charged to the budget and sending the request to a paid
+model regardless. The gateway applies the limit to the response instead. `/health` additionally reports
 `busy` and a `budget` of `{ limit, used, remaining, spilloverLimit, estimate }`.
 
 `state` is one of `available`, `rate_limited`, `unavailable`. `listCostUsd` is what the
