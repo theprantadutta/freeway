@@ -95,18 +95,30 @@ function record(tokens, durationMs) {
 }
 
 /**
- * How long a call takes on this host, from the calls this host has actually made.
+ * How long a call is likely to take on this host, from the calls it has actually
+ * made. The p90 rather than the median, and deliberately so.
  *
- * It matters because the deadline a caller can offer is fixed while the machine is
- * not: the same bridge answers in about 3.5s on a laptop and about 11s on the
- * production VPS. Guessing at build time gets one of those wrong, so nothing guesses.
+ * It matters at all because the deadline a caller offers is fixed while the machine
+ * is not: the same bridge answers in about 3.5s on a laptop and 4-11s on the
+ * production VPS depending on load. Guessing at build time gets one of those wrong,
+ * so nothing guesses.
+ *
+ * It is a high percentile because the two ways of being wrong do not cost the same.
+ * Refusing work that would have finished loses one free answer, and the caller pays
+ * a model a fraction of a cent. Accepting work that will not finish costs the caller
+ * its whole deadline before it goes to that model anyway, and spends budget here on
+ * a reply nobody receives. With a median, half of all admitted calls are expected to
+ * overrun -- fine for a decision that is cheap to get wrong, and this one is not, so
+ * the bridge only takes work it is fairly confident of finishing.
  */
-function typicalDurationMs() {
-  const timed = ledger.filter((e) => e.durationMs > 0).slice(-10);
+function expectedDurationMs() {
+  // A wider window than the token estimate uses: a percentile needs more samples
+  // than an average before it means anything.
+  const timed = ledger.filter((e) => e.durationMs > 0).slice(-20);
   if (!timed.length) return null;
 
   const sorted = timed.map((e) => e.durationMs).sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.9) - 1)];
 }
 
 /**
@@ -130,12 +142,12 @@ function admit(priority, deadlineMs) {
     // paid model on top, while the call it abandoned keeps running here, holding the
     // one slot and spending the budget premium needs, to produce an answer nobody
     // will ever read.
-    const typical = typicalDurationMs();
-    if (deadlineMs && typical && typical > deadlineMs) {
+    const expected = expectedDurationMs();
+    if (deadlineMs && expected && expected > deadlineMs) {
       return {
         ok: false,
         reasonCode: "too_slow",
-        reason: `calls here take about ${typical}ms; the caller allowed ${deadlineMs}ms`,
+        reason: `calls here take up to ${expected}ms; the caller allowed ${deadlineMs}ms`,
       };
     }
     if (b.used + b.estimate > b.spilloverLimit) {

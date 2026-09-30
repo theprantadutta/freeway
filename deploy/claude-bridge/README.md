@@ -81,7 +81,7 @@ and the moment that capacity is in question it is refused and the request goes t
 the model it would have used anyway.
 
 Spillover is also refused when this host cannot finish in the time the caller
-allowed. The bridge times its own calls and compares the median against the
+allowed. The bridge times its own calls and compares the p90 against the
 `deadlineMs` on the request, because the same bridge answers in about 3.5s on a
 laptop and about 11s on a small VPS -- a deadline that is generous on one is
 impossible on the other, and only the host knows which it is.
@@ -92,6 +92,13 @@ the call it walked away from keeps running here, holding the one slot and spendi
 the budget premium needs, to produce an answer nobody will read. Measured in
 production before this existed, it added about five seconds to 93% of moderate
 requests and starved premium of budget at peak.
+
+The p90 rather than the median, because the two ways of being wrong cost very
+different amounts. Refusing work that would have finished loses one free answer and
+the caller pays a fraction of a cent. Accepting work that will not finish costs the
+caller its entire deadline before it uses that model anyway, and spends budget here
+on a reply nobody receives. A median expects half of all admitted calls to overrun,
+which is only acceptable when being wrong is cheap.
 
 For the same reason the bridge now stops the CLI when the caller disconnects.
 
