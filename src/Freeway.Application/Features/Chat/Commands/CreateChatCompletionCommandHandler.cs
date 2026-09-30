@@ -72,7 +72,14 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             FrequencyPenalty = request.FrequencyPenalty,
             PresencePenalty = request.PresencePenalty,
             Stop = request.Stop,
-            Stream = request.Stream
+            Stream = request.Stream,
+            Reasoning = request.Reasoning is null ? null : new ReasoningOptions
+            {
+                Effort = request.Reasoning.Effort,
+                Exclude = request.Reasoning.Exclude,
+                MaxTokens = request.Reasoning.MaxTokens,
+                Enabled = request.Reasoning.Enabled
+            }
         };
 
         // Accepted in the request shape for OpenAI compatibility, but never

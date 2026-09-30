@@ -104,6 +104,7 @@ OpenAI-compatible chat completion endpoint.
 | field | type | meaning |
 |---|---|---|
 | `stream` | bool | **Not supported.** Sending `true` returns `400`. It used to be forwarded upstream while the reply was still parsed as one JSON body, which produced a broken response rather than a stream. |
+| `reasoning` | object | Reasoning effort for models that think before answering, passed straight through (e.g. `{"effort": "low"}`). Usually the largest cost lever available on such a model — see below. Models that don't reason ignore it. |
 | `use_local_only` | bool | Serve from the local Claude Code subscription or fail. Never falls back to a paid model, so the request cannot quietly cost money. `503` if the subscription is unavailable, throttled or out of hourly budget; `400` for image models, which it cannot generate. |
 
 ```json
@@ -123,6 +124,28 @@ OpenAI-compatible chat completion endpoint.
 - `"paid:premium"` - Highest-capability models
 - `"image"` - Cheapest image generation model, ranked by what it costs to generate
 - `"<model_id>"` - Use specific model by ID
+
+### Reasoning costs more than it looks
+
+`paid:moderate` and `paid:premium` route to reasoning models, and reasoning is billed
+as output at the full rate whether or not anyone reads it. On a short persona reply
+through `openai/gpt-5-mini`:
+
+| `reasoning` | completion tokens | of which reasoning | cost |
+|---|---|---|---|
+| *(omitted)* | 488 | 320 | $0.000985 |
+| `{"effort": "low"}` | 246 | **64** | **$0.000501** |
+| `{"exclude": true}` | 408 | 256 | $0.000825 |
+| `openai/gpt-4.1-mini`, which does not reason | 110 | 0 | $0.000191 |
+
+Two thirds of the default bill is thinking that never reaches the caller. `effort` is
+the only field that reliably changes that: `exclude` hides the reasoning but still
+pays for it, `max_tokens` inside `reasoning` was ignored, and `{"enabled": false}` is
+rejected outright by some endpoints with *"Reasoning is mandatory for this endpoint"*.
+
+If a lane's work is short — classification, moderation verdicts, a reply capped at a
+hundred words — reasoning is rarely earning its multiple. Send `{"effort": "low"}`, or
+name a model that does not reason.
 
 ### Paid Tiers
 

@@ -62,6 +62,37 @@ public class ChatCompletionOptions
     public double? PresencePenalty { get; set; }
     public List<string>? Stop { get; set; }
     public bool Stream { get; set; }
+
+    /// <summary>How hard a reasoning model should think. Ignored by models without it.</summary>
+    public ReasoningOptions? Reasoning { get; set; }
+}
+
+/// <summary>
+/// Controls the thinking a reasoning model does before it answers.
+///
+/// Worth having because reasoning is billed as output and is usually the larger
+/// half of it. Measured on a short persona reply through openai/gpt-5-mini: 488
+/// completion tokens by default, of which 320 were reasoning nobody reads, against
+/// 246 with effort "low", of which 64 were. Same answer, half the bill.
+///
+/// Only "effort" reliably changes anything. "exclude" hides the reasoning from the
+/// response but still pays for it, "max_tokens" was ignored, and some endpoints
+/// reject enabled=false outright with "Reasoning is mandatory for this endpoint".
+/// All of it is passed through as sent, so callers can use whatever a model
+/// supports without waiting on this gateway to learn about it.
+/// </summary>
+public class ReasoningOptions
+{
+    /// <summary>"low", "medium" or "high".</summary>
+    public string? Effort { get; set; }
+
+    /// <summary>Omit the reasoning from the reply. Does not make it cheaper.</summary>
+    public bool? Exclude { get; set; }
+
+    public int? MaxTokens { get; set; }
+
+    /// <summary>Some endpoints refuse false and fail the request.</summary>
+    public bool? Enabled { get; set; }
 }
 
 public class ChatCompletionResult

@@ -21,6 +21,29 @@ public class ChatCompletionRequestDto
     /// money. Sent as "use_local_only".
     /// </summary>
     public bool UseLocalOnly { get; set; }
+
+    /// <summary>
+    /// Reasoning effort, for models that do it. Sent as "reasoning", the same shape
+    /// the upstream takes: {"effort": "low"}.
+    ///
+    /// Usually the cheapest change available on a reasoning model, because thinking
+    /// is billed as output at the full rate whether or not anyone reads it.
+    /// </summary>
+    public ReasoningOptionsDto? Reasoning { get; set; }
+}
+
+public class ReasoningOptionsDto
+{
+    /// <summary>"low", "medium" or "high".</summary>
+    public string? Effort { get; set; }
+
+    /// <summary>Hides the reasoning from the reply without reducing what it costs.</summary>
+    public bool? Exclude { get; set; }
+
+    public int? MaxTokens { get; set; }
+
+    /// <summary>Some endpoints reject false outright, failing the request.</summary>
+    public bool? Enabled { get; set; }
 }
 
 public class ChatCompletionResponseDto
