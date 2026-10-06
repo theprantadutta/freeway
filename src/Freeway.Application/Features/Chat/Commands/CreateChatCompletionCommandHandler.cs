@@ -604,6 +604,11 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
                 Provider = result.ProviderName ?? "openrouter",
                 CostSource = costSource,
                 UpstreamProvider = result.UpstreamProvider,
+
+                // The request's own shape, so a change to how a caller calls this
+                // gateway can be confirmed from the logs rather than inferred.
+                ReasoningEffort = request.Reasoning?.Effort,
+                RequestedMaxTokens = request.MaxTokens,
                 AvoidedCostUsd = result.AvoidedCostUsd,
                 RequestMessages = request.Messages.Select(m => new ChatMessage
                 {

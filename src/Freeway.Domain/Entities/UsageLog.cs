@@ -40,6 +40,21 @@ public class UsageLog : BaseEntity
     public string? UpstreamProvider { get; set; }
 
     /// <summary>
+    /// What the caller asked for, as opposed to what came back. Both are null when
+    /// the caller said nothing.
+    ///
+    /// Recorded because a request's shape is otherwise invisible after the fact, and
+    /// that is exactly when it is wanted: after changing how an app calls the gateway,
+    /// the only question is whether the change is live. Token counts answer it slowly
+    /// and ambiguously -- output falling could be a smaller cap, lower reasoning
+    /// effort or simply shorter questions -- while these two say so outright.
+    /// </summary>
+    public string? ReasoningEffort { get; set; }
+
+    /// <summary>The max_tokens the caller sent, not the tokens produced.</summary>
+    public int? RequestedMaxTokens { get; set; }
+
+    /// <summary>
     /// List price avoided by serving this out of a subscription rather than a paid
     /// provider. Null for anything that was actually billed.
     /// </summary>
