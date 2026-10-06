@@ -83,6 +83,14 @@ public class UsageLogDto
     public List<ChatMessageDto>? RequestMessages { get; set; }
     public string? ResponseContent { get; set; }
     public string? FinishReason { get; set; }
+
+    /// <summary>
+    /// What the caller asked for, as sent. Null when they did not ask, which is how
+    /// you tell "this app is not sending it" apart from "it sent the default".
+    /// </summary>
+    public string? ReasoningEffort { get; set; }
+
+    public int? RequestedMaxTokens { get; set; }
 }
 
 public class ChatMessageDto

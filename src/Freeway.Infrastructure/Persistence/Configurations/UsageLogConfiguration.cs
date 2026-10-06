@@ -45,6 +45,15 @@ public class UsageLogConfiguration : IEntityTypeConfiguration<UsageLog>
             .HasColumnName("upstream_provider")
             .HasMaxLength(100);
 
+        // What the caller asked for. Null whenever they did not ask, which is most
+        // rows, so both stay nullable and nothing is backfilled.
+        builder.Property(u => u.ReasoningEffort)
+            .HasColumnName("reasoning_effort")
+            .HasMaxLength(10);
+
+        builder.Property(u => u.RequestedMaxTokens)
+            .HasColumnName("requested_max_tokens");
+
         // Only set on rows served out of a subscription.
         builder.Property(u => u.AvoidedCostUsd)
             .HasColumnName("avoided_cost_usd")

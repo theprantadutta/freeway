@@ -62,7 +62,9 @@ public class GetUsageLogsQueryHandler : IRequestHandler<GetUsageLogsQuery, Resul
                 .Select(m => new ChatMessageDto { Role = m.Role, Content = m.Content })
                 .ToList(),
             ResponseContent = u.ResponseContent,
-            FinishReason = u.FinishReason
+            FinishReason = u.FinishReason,
+            ReasoningEffort = u.ReasoningEffort,
+            RequestedMaxTokens = u.RequestedMaxTokens
         }).ToList();
 
         return Result<UsageLogsResponseDto>.Success(new UsageLogsResponseDto
