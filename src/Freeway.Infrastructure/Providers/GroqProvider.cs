@@ -39,18 +39,7 @@ public class GroqProvider : BaseAiProvider, IModelFetcher
 
             var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
 
-            var request = new GroqRequest
-            {
-                Model = model,
-                Messages = messages.Select(m => new GroqMessage { Role = m.Role, Content = m.Content }).ToList(),
-                Temperature = options?.Temperature,
-                MaxTokens = options?.MaxTokens,
-                TopP = options?.TopP,
-                FrequencyPenalty = options?.FrequencyPenalty,
-                PresencePenalty = options?.PresencePenalty,
-                Stop = options?.Stop,
-                Stream = false
-            };
+            var request = BuildRequest(model, messages, options);
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions");
             httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
@@ -110,6 +99,35 @@ public class GroqProvider : BaseAiProvider, IModelFetcher
             return CreateErrorResult(ex.Message, (int)stopwatch.ElapsedMilliseconds);
         }
     }
+
+    public override Task<ChatCompletionStream> StreamChatCompletionAsync(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
+        // Groq reports usage on its last chunk under x_groq, so nothing extra is asked for.
+        return StreamOpenAiCompatibleAsync(
+            "https://api.groq.com/openai/v1/chat/completions",
+            model,
+            BuildRequest(model, messages, options),
+            "Groq",
+            requestUsage: false,
+            cancellationToken);
+    }
+
+    private static GroqRequest BuildRequest(string model, List<ChatMessage> messages, ChatCompletionOptions? options) => new()
+    {
+        Model = model,
+        Messages = messages.Select(m => new GroqMessage { Role = m.Role, Content = m.Content }).ToList(),
+        Temperature = options?.Temperature,
+        MaxTokens = options?.MaxTokens,
+        TopP = options?.TopP,
+        FrequencyPenalty = options?.FrequencyPenalty,
+        PresencePenalty = options?.PresencePenalty,
+        Stop = options?.Stop
+    };
 
     public async Task<ProviderModelListResult> FetchModelsAsync(CancellationToken cancellationToken = default)
     {

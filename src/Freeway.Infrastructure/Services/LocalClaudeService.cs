@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Freeway.Domain.Entities;
 using Freeway.Domain.Interfaces;
+using Freeway.Infrastructure.Streaming;
 using Microsoft.Extensions.Logging;
 
 namespace Freeway.Infrastructure.Services;
@@ -124,6 +126,7 @@ public class LocalClaudeService : ILocalClaudeService
                 Model = parsed.Model,
                 Busy = parsed.Busy,
                 Budget = parsed.Budget,
+                Plan = parsed.Plan,
                 CheckedAt = DateTime.UtcNow
             };
             SetHealth(health);
@@ -206,12 +209,13 @@ public class LocalClaudeService : ILocalClaudeService
             {
                 var reason = parsed?.Reason ?? "bridge returned an unreadable body";
 
-                // "busy" and "budget" are the bridge working as designed, not failing:
-                // it is declining spillover to protect premium's share. Treating them
-                // as evidence of ill health would let cheap traffic mark the bridge
-                // unavailable and lock premium out of the subscription entirely --
-                // the exact outcome the reserve exists to prevent.
-                var deliberate = parsed?.ReasonCode is "busy" or "budget";
+                // "busy", "budget" and "too_slow" are the bridge working as designed,
+                // not failing: it is declining spillover to protect premium's share,
+                // or work it could not finish inside the caller's deadline. Treating
+                // them as evidence of ill health would let cheap traffic mark the
+                // bridge unavailable and lock premium out of the subscription
+                // entirely -- the exact outcome the reserve exists to prevent.
+                var deliberate = IsDeliberate(parsed?.ReasonCode);
 
                 if (!deliberate)
                 {
@@ -294,6 +298,226 @@ public class LocalClaudeService : ILocalClaudeService
         }
     }
 
+    public async Task<ChatCompletionStream> StreamAsync(
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        LocalClaudePriority priority = LocalClaudePriority.Premium,
+        CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var spillover = priority == LocalClaudePriority.Spillover;
+
+        if (!IsConfigured)
+        {
+            return ChatCompletionStream.Failed(Failed("local Claude is not configured", stopwatch, spillover));
+        }
+
+        var result = UpstreamStream.NewResult("claude-code", "claude-code");
+        result.Id = $"chatcmpl-local-{Guid.NewGuid():N}";
+
+        var state = new BridgeStreamState();
+        var stream = await ChatCompletionStream.OpenAsync(
+            result, ReadBridgeStreamAsync(messages, options, spillover, result, state, cancellationToken));
+
+        if (stream.Opened || state.Reported)
+        {
+            return stream;
+        }
+
+        // A failure the bridge reported has already been judged and logged where it was
+        // read. Anything else never got that far -- the bridge was unreachable, or
+        // slower than the caller would wait -- and is treated as CompleteAsync treats it:
+        // a spillover deadline says nothing about premium, so only premium marks health.
+        if (!spillover)
+        {
+            SetHealth(new LocalClaudeHealth
+            {
+                State = LocalClaudeState.Unavailable,
+                Detail = stream.Result.ErrorMessage,
+                CheckedAt = DateTime.UtcNow
+            });
+        }
+
+        return ChatCompletionStream.Failed(Failed(
+            $"could not reach the bridge: {stream.Result.ErrorMessage}", stopwatch, spillover));
+    }
+
+    /// <summary>
+    /// Reads the bridge's streaming reply: a "delta" line per piece of text, then one
+    /// "done" or "error" line with the same fields a non-streaming reply carries.
+    /// </summary>
+    private async IAsyncEnumerable<ChatCompletionDelta> ReadBridgeStreamAsync(
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options,
+        bool spillover,
+        ChatCompletionResult result,
+        BridgeStreamState state,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var fullTimeout = TimeSpan.FromSeconds(_timeoutSeconds);
+        var deadlineSeconds = spillover ? _spilloverTimeoutSeconds : _timeoutSeconds;
+
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        idle.CancelAfter(TimeSpan.FromSeconds(deadlineSeconds));
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/complete");
+        if (!string.IsNullOrWhiteSpace(_token))
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
+
+        request.Content = JsonContent.Create(new
+        {
+            messages = messages.Select(m => new { role = m.Role, content = m.Content }).ToList(),
+            maxTokens = options?.MaxTokens,
+            priority = spillover ? "spillover" : "premium",
+            deadlineMs = deadlineSeconds * 1000,
+            stream = true
+        });
+
+        using var response = await UpstreamStream.SendAsync(
+            _httpClient, request, "claude-bridge", _logger, idle.Token);
+
+        // max_tokens, enforced as the text arrives. The non-streaming path cuts by the
+        // share of the answer the cap allows, which needs the final token count; a
+        // stream has to decide before that exists, so it counts characters at the
+        // usual four to a token. Past the cap nothing more is passed on, but the call
+        // is still read to the end: the bridge only charges its budget for calls that
+        // finish, and the token counts arrive on the last line.
+        var maxTokens = options?.MaxTokens is > 0 ? options.MaxTokens : null;
+        var charBudget = maxTokens * CharsPerToken;
+        var sent = 0;
+        var capped = false;
+        var started = false;
+
+        // The first wait is bounded by the caller's deadline, which for spillover is
+        // seconds. Lines after that are allowed the full timeout between them.
+        await foreach (var line in UpstreamStream.ReadLinesAsync(response, idle, fullTimeout, idle.Token))
+        {
+            var parsed = JsonSerializer.Deserialize<BridgeStreamLine>(line, JsonOptions);
+            if (parsed is null)
+            {
+                continue;
+            }
+
+            if (parsed.Type == "delta")
+            {
+                if (capped || string.IsNullOrEmpty(parsed.Text))
+                {
+                    continue;
+                }
+
+                started = true;
+                var text = parsed.Text;
+                if (charBudget is { } budget && sent + text.Length >= budget)
+                {
+                    capped = true;
+                    var keep = Math.Max(0, budget - sent);
+                    sent += keep;
+                    yield return new ChatCompletionDelta { Content = text[..keep], FinishReason = "length" };
+                    continue;
+                }
+
+                sent += text.Length;
+                yield return new ChatCompletionDelta { Content = text };
+                continue;
+            }
+
+            if (parsed.Type == "error" || !parsed.Ok)
+            {
+                state.Reported = true;
+                throw new ChatCompletionStreamException(BridgeFailure(parsed, spillover));
+            }
+
+            // "done": the same envelope CompleteAsync reads.
+            _logger.LogInformation(
+                "{Lane} request streamed by local Claude ({Model}) in {Duration}ms, {Prompt}+{Completion} tokens, no charge",
+                spillover ? "Spillover" : "Premium",
+                parsed.Model ?? "unknown", parsed.DurationMs ?? 0,
+                parsed.PromptTokens, parsed.CompletionTokens);
+
+            var completionTokens = capped && maxTokens is { } cap
+                ? Math.Min(cap, parsed.CompletionTokens)
+                : parsed.CompletionTokens;
+
+            result.Model = parsed.Model ?? "claude-code";
+            result.UpstreamProvider = parsed.Model;
+            result.Usage = new ChatCompletionUsage
+            {
+                PromptTokens = parsed.PromptTokens,
+                CompletionTokens = completionTokens,
+                TotalTokens = parsed.PromptTokens + completionTokens
+            };
+
+            // Nothing is billed: it comes out of a subscription. What the CLI reports
+            // is the list price avoided, recorded separately as money not spent.
+            result.CostUsd = 0m;
+            result.CostSource = "subscription";
+            result.AvoidedCostUsd = parsed.ListCostUsd;
+
+            if (!capped)
+            {
+                yield return new ChatCompletionDelta
+                {
+                    // An empty answer still has to open the stream with something.
+                    Content = started ? null : "",
+                    FinishReason = MapStopReason(parsed.StopReason)
+                };
+            }
+
+            yield break;
+        }
+
+        throw new ChatCompletionStreamException("the bridge closed the stream before the call finished");
+    }
+
+    /// <summary>
+    /// Turns a bridge-reported failure into a reason, applying the same judgement
+    /// CompleteAsync does about whether it says anything about the bridge's health.
+    /// </summary>
+    private string BridgeFailure(BridgeCompletion parsed, bool spillover)
+    {
+        var reason = parsed.Reason ?? "bridge reported a failure without a reason";
+        var deliberate = IsDeliberate(parsed.ReasonCode);
+
+        if (!deliberate)
+        {
+            SetHealth(new LocalClaudeHealth
+            {
+                State = reason.Contains("rate", StringComparison.OrdinalIgnoreCase)
+                    ? LocalClaudeState.RateLimited
+                    : LocalClaudeState.Unavailable,
+                Detail = reason,
+                CheckedAt = DateTime.UtcNow
+            });
+        }
+
+        return Failed(reason, Stopwatch.StartNew(), spillover, deliberate).ErrorMessage!;
+    }
+
+    // "plan" is a configured ceiling on the subscription's own usage being reached:
+    // policy, like the budget, and no sign that anything is wrong.
+    private static bool IsDeliberate(string? reasonCode) => reasonCode is "busy" or "budget" or "too_slow" or "plan";
+
+    /// <summary>Rough characters per token, for cutting a stream at max_tokens.</summary>
+    private const int CharsPerToken = 4;
+
+    /// <summary>
+    /// Claude's stop reasons in the vocabulary OpenAI clients expect. "end_turn" passed
+    /// through verbatim is not a finish_reason any of them know.
+    /// </summary>
+    private static string MapStopReason(string? stopReason) => stopReason switch
+    {
+        null or "end_turn" or "stop_sequence" => "stop",
+        "max_tokens" => "length",
+        "refusal" => "content_filter",
+        _ => stopReason
+    };
+
+    /// <summary>Set once the bridge itself has reported how a stream failed.</summary>
+    private sealed class BridgeStreamState
+    {
+        public bool Reported { get; set; }
+    }
+
     /// <summary>
     /// Honours max_tokens on the local path, which the CLI cannot be relied on to do
     /// itself.
@@ -314,7 +538,7 @@ public class LocalClaudeService : ILocalClaudeService
         int? maxTokens,
         string? stopReason)
     {
-        var finish = stopReason ?? "stop";
+        var finish = MapStopReason(stopReason);
 
         if (maxTokens is not > 0 || completionTokens <= maxTokens || text.Length == 0)
         {
@@ -372,6 +596,13 @@ public class LocalClaudeService : ILocalClaudeService
         public string? Model { get; set; }
         public bool Busy { get; set; }
         public LocalClaudeBudget? Budget { get; set; }
+        public LocalClaudePlanUsage? Plan { get; set; }
+    }
+
+    private class BridgeStreamLine : BridgeCompletion
+    {
+        /// <summary>"delta", "done" or "error".</summary>
+        public string? Type { get; set; }
     }
 
     private class BridgeCompletion

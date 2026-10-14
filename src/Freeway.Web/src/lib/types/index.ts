@@ -141,6 +141,10 @@ export interface UsageLog {
   provider?: string;
   response_content?: string;
   finish_reason?: string;
+  /** The caller asked for a stream. */
+  streamed?: boolean;
+  /** For a stream, the wait before its first token. */
+  time_to_first_token_ms?: number | null;
   created_at: string;
 }
 

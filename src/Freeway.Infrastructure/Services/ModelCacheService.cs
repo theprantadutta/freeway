@@ -203,7 +203,8 @@ public class ModelCacheService : IModelCacheService
                     ContextLength = model.ContextLength,
                     PromptPrice = model.Pricing.Prompt,
                     CompletionPrice = model.Pricing.Completion,
-                    IsFree = isFree
+                    IsFree = isFree,
+                    IsGeneralChat = IsGeneralChat(model)
                 };
 
                 if (isFree)
@@ -267,7 +268,7 @@ public class ModelCacheService : IModelCacheService
                 // Auto-select best free model (largest context)
                 if (_selectedFreeModel == null || !freeModels.Any(m => m.Id == _selectedFreeModel.Id))
                 {
-                    _selectedFreeModel = freeModels.FirstOrDefault();
+                    _selectedFreeModel = freeModels.FirstOrDefault(m => m.IsGeneralChat) ?? freeModels.FirstOrDefault();
                     if (_selectedFreeModel != null)
                     {
                         _logger.LogInformation("Auto-selected best free model: {ModelId} (context: {Context})",
@@ -360,9 +361,11 @@ public class ModelCacheService : IModelCacheService
 
             var curatedFound = chain.Count;
 
+            // The price band fills the rest of the chain, cheapest first -- but only with
+            // models that hold a conversation. Curated models above are taken as listed.
             foreach (var model in members)
             {
-                if (seen.Add(model.Id))
+                if (model.IsGeneralChat && seen.Add(model.Id))
                     chain.Add(model);
             }
 
@@ -386,6 +389,29 @@ public class ModelCacheService : IModelCacheService
 
         return result;
     }
+
+    /// <summary>Parameters every conversational model accepts at least one of.</summary>
+    private static readonly HashSet<string> GeneralChatParameters =
+        new(StringComparer.OrdinalIgnoreCase) { "temperature", "top_p", "tools", "reasoning" };
+
+    /// <summary>
+    /// Whether a model can stand in for "a chat model" when a lane picks one for the
+    /// caller.
+    ///
+    /// The catalog has single-purpose models priced and shaped like chat models: at the
+    /// time of writing the two cheapest in the whole paid band were ScaleDown's
+    /// summarize and extract, so paid:low -- cheapest first -- sent every request to a
+    /// summariser, which answered "write a story" by returning the prompt. What gives
+    /// them away is the parameters they take: none of temperature, top_p, tools or
+    /// reasoning, which every conversational model accepts at least one of. That rule
+    /// excluded six of 462 models, every one of them special-purpose, and nothing else.
+    ///
+    /// A model whose catalog entry does not list its parameters at all is kept, so an
+    /// omission upstream can never empty a tier.
+    /// </summary>
+    private static bool IsGeneralChat(OpenRouterModel model) =>
+        model.SupportedParameters is null ||
+        model.SupportedParameters.Any(GeneralChatParameters.Contains);
 
     private static bool IsFreeModel(OpenRouterModel model)
     {

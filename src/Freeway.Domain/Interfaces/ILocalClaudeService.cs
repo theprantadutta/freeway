@@ -33,6 +33,18 @@ public interface ILocalClaudeService
         ChatCompletionOptions? options = null,
         LocalClaudePriority priority = LocalClaudePriority.Premium,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Streams a completion as Claude Code writes it. Like <see cref="CompleteAsync"/>
+    /// it never throws: a stream that cannot open comes back failed, with a reason.
+    /// For spillover the short deadline applies to the first delta only; once the
+    /// answer is arriving it is allowed to finish.
+    /// </summary>
+    Task<ChatCompletionStream> StreamAsync(
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        LocalClaudePriority priority = LocalClaudePriority.Premium,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -97,6 +109,12 @@ public class LocalClaudeHealth
     /// </summary>
     public LocalClaudeBudget? Budget { get; set; }
 
+    /// <summary>
+    /// The subscription plan's own usage, as Claude Code last reported it. Unlike the
+    /// budget this is read, not configured. Null until the bridge has seen a report.
+    /// </summary>
+    public LocalClaudePlanUsage? Plan { get; set; }
+
     public bool CanServe => State == LocalClaudeState.Available;
 
     /// <summary>One line for a log or an email, explaining the current verdict.</summary>
@@ -107,6 +125,39 @@ public class LocalClaudeHealth
         LocalClaudeState.Unavailable => $"unavailable: {Detail ?? "no detail"}",
         _ => "not checked yet"
     };
+}
+
+/// <summary>
+/// How much of the Claude plan is used, per window (e.g. "five_hour", "seven_day"),
+/// from the rate-limit report Claude Code prints with each call.
+/// </summary>
+public class LocalClaudePlanUsage
+{
+    /// <summary>The CLI's own verdict, e.g. "allowed" or "allowed_warning".</summary>
+    public string? Status { get; set; }
+
+    /// <summary>The highest utilization among windows that have not reset, 0 to 1.</summary>
+    public double? Utilization { get; set; }
+
+    /// <summary>Which window <see cref="Utilization"/> comes from.</summary>
+    public string? Window { get; set; }
+
+    public Dictionary<string, LocalClaudePlanWindow> Windows { get; set; } = new();
+
+    /// <summary>When the bridge last saw a report, in Unix milliseconds.</summary>
+    public long? SeenAt { get; set; }
+
+    /// <summary>The ceilings the bridge is enforcing, if any (BRIDGE_*_PLAN_UTILIZATION).</summary>
+    public double? MaxUtilization { get; set; }
+    public double? SpilloverMaxUtilization { get; set; }
+}
+
+public class LocalClaudePlanWindow
+{
+    public double Utilization { get; set; }
+
+    /// <summary>Unix seconds.</summary>
+    public long? ResetsAt { get; set; }
 }
 
 /// <summary>A rolling hour of subscription spend, as the bridge sees it.</summary>

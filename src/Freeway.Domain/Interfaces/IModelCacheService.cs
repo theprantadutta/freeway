@@ -62,5 +62,12 @@ public class CachedModel
     /// <summary>True when the model is explicitly listed in its tier's curated catalog.</summary>
     public bool IsCurated { get; set; }
 
+    /// <summary>
+    /// False for a single-purpose model that only looks like a chat model in the
+    /// catalog -- a summariser, an extractor, a code patcher -- and so must never be
+    /// picked automatically for a lane. Still reachable by naming it.
+    /// </summary>
+    public bool IsGeneralChat { get; set; } = true;
+
     public CachedModel Clone() => (CachedModel)MemberwiseClone();
 }

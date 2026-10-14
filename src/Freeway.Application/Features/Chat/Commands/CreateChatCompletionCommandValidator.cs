@@ -30,6 +30,12 @@ public class CreateChatCompletionCommandValidator : AbstractValidator<CreateChat
                 .InclusiveBetween(0, 2).WithMessage("Temperature must be between 0 and 2");
         });
 
+        When(x => x.N.HasValue, () =>
+        {
+            RuleFor(x => x.N!.Value)
+                .Equal(1).WithMessage("Only n=1 is supported: this gateway returns a single choice");
+        });
+
         When(x => x.MaxTokens.HasValue, () =>
         {
             RuleFor(x => x.MaxTokens!.Value)

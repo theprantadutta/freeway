@@ -1,9 +1,11 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Freeway.Domain.Entities;
 using Freeway.Domain.Interfaces;
+using Freeway.Infrastructure.Streaming;
 using Microsoft.Extensions.Logging;
 
 namespace Freeway.Infrastructure.Services;
@@ -173,29 +175,10 @@ public class OpenRouterService : IOpenRouterService
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(_completionTimeout));
 
-            var request = new OpenRouterChatRequest
-            {
-                Model = modelId,
-                Messages = messages.Select(m => new OpenRouterMessage { Role = m.Role, Content = m.Content }).ToList(),
-                Temperature = options?.Temperature,
-                MaxTokens = options?.MaxTokens,
-                TopP = options?.TopP,
-                FrequencyPenalty = options?.FrequencyPenalty,
-                PresencePenalty = options?.PresencePenalty,
-                Stop = options?.Stop,
-                Stream = options?.Stream ?? false,
-                Provider = BuildProviderPreferences(),
-                // Makes the response carry usage.cost: the amount actually billed.
-                // Without this we can only multiply tokens by a cached headline
-                // price, which provider routing can make wrong.
-                Usage = new OpenRouterUsagePreference { Include = true },
-
-                // Passed straight through. Reasoning is billed as output, so on a
-                // thinking model this is often the largest lever a caller has, and
-                // models that do not reason ignore it rather than failing -- which
-                // matters, because a tier's fallback chain mixes the two.
-                Reasoning = options?.Reasoning
-            };
+            // Always a single JSON body here, whatever the caller asked for: streaming
+            // has its own method, and forwarding the flag from this one is what used to
+            // produce a broken reply instead of a stream.
+            var request = BuildRequest(modelId, messages, options, stream: false);
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
             httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
@@ -286,6 +269,68 @@ public class OpenRouterService : IOpenRouterService
             };
         }
     }
+
+
+    public Task<ChatCompletionStream> StreamChatCompletionAsync(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        // usage.include applies to streams as well: the final chunk then carries the
+        // billed amount, so a streamed request is costed exactly like any other.
+        var payload = JsonSerializer.Serialize(BuildRequest(modelId, messages, options, stream: true), JsonOptions);
+        var result = UpstreamStream.NewResult("openrouter", modelId);
+
+        HttpRequestMessage CreateRequest()
+        {
+            var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
+            httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
+            httpRequest.Headers.Add("HTTP-Referer", "https://freeway.pranta.dev");
+            httpRequest.Headers.Add("X-Title", "Freeway");
+            httpRequest.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+            return httpRequest;
+        }
+
+        return ChatCompletionStream.OpenAsync(
+            result,
+            OpenAiChunkStream.ReadAsync(
+                _httpClient,
+                CreateRequest,
+                result,
+                "OpenRouter",
+                TimeSpan.FromSeconds(_completionTimeout),
+                _logger,
+                cancellationToken));
+    }
+
+    private OpenRouterChatRequest BuildRequest(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options,
+        bool stream) => new()
+    {
+        Model = modelId,
+        Messages = messages.Select(m => new OpenRouterMessage { Role = m.Role, Content = m.Content }).ToList(),
+        Temperature = options?.Temperature,
+        MaxTokens = options?.MaxTokens,
+        TopP = options?.TopP,
+        FrequencyPenalty = options?.FrequencyPenalty,
+        PresencePenalty = options?.PresencePenalty,
+        Stop = options?.Stop,
+        Stream = stream,
+        Provider = BuildProviderPreferences(),
+        // Makes the response carry usage.cost: the amount actually billed.
+        // Without this we can only multiply tokens by a cached headline
+        // price, which provider routing can make wrong.
+        Usage = new OpenRouterUsagePreference { Include = true },
+
+        // Passed straight through. Reasoning is billed as output, so on a
+        // thinking model this is often the largest lever a caller has, and
+        // models that do not reason ignore it rather than failing -- which
+        // matters, because a tier's fallback chain mixes the two.
+        Reasoning = options?.Reasoning
+    };
 
     // Internal DTOs for OpenRouter API
     private class OpenRouterModelsResponse

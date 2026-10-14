@@ -261,11 +261,21 @@ namespace Freeway.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("response_time_ms");
 
+                    b.Property<bool>("Streamed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("streamed");
+
                     b.Property<bool>("Success")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(true)
                         .HasColumnName("success");
+
+                    b.Property<int?>("TimeToFirstTokenMs")
+                        .HasColumnType("integer")
+                        .HasColumnName("time_to_first_token_ms");
 
                     b.Property<string>("UpstreamProvider")
                         .HasMaxLength(100)

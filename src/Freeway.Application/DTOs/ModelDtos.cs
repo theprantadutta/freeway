@@ -66,6 +66,13 @@ public class SetModelResponseDto
 public class ProviderModelDto
 {
     public string Id { get; set; } = string.Empty;
+
+    /// <summary>Always "model", as in OpenAI's model list.</summary>
+    public string Object { get; set; } = "model";
+
+    /// <summary>Unix seconds, as OpenAI's list has it; 0 when the provider does not say.</summary>
+    public long Created { get; set; }
+
     public string Name { get; set; } = string.Empty;
     public string Provider { get; set; } = string.Empty;
     public string? Description { get; set; }
@@ -74,8 +81,14 @@ public class ProviderModelDto
     public DateTime? CreatedAt { get; set; }
 }
 
+/// <summary>
+/// GET /v1/models. Shaped as OpenAI's model list ("object": "list", entries with id,
+/// object, created and owned_by) so client.models.list() in an OpenAI SDK reads it;
+/// the remaining fields are this gateway's own and are ignored by those clients.
+/// </summary>
 public class ProviderModelsListDto
 {
+    public string Object { get; set; } = "list";
     public List<ProviderModelDto> Data { get; set; } = new();
     public int TotalCount { get; set; }
     public int ProviderCount { get; set; }

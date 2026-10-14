@@ -64,7 +64,9 @@ public class GetUsageLogsQueryHandler : IRequestHandler<GetUsageLogsQuery, Resul
             ResponseContent = u.ResponseContent,
             FinishReason = u.FinishReason,
             ReasoningEffort = u.ReasoningEffort,
-            RequestedMaxTokens = u.RequestedMaxTokens
+            RequestedMaxTokens = u.RequestedMaxTokens,
+            Streamed = u.Streamed,
+            TimeToFirstTokenMs = u.TimeToFirstTokenMs
         }).ToList();
 
         return Result<UsageLogsResponseDto>.Success(new UsageLogsResponseDto

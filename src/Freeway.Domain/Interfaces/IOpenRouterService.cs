@@ -17,6 +17,16 @@ public interface IOpenRouterService
         List<ChatMessage> messages,
         ChatCompletionOptions? options = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Streams a completion. Opens only once the first delta has arrived, so a model
+    /// that fails before producing anything can still be swapped for the next one.
+    /// </summary>
+    Task<ChatCompletionStream> StreamChatCompletionAsync(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default);
 }
 
 public class OpenRouterModel
@@ -28,6 +38,12 @@ public class OpenRouterModel
     public OpenRouterPricing Pricing { get; set; } = new();
     public OpenRouterArchitecture? Architecture { get; set; }
     public long? Created { get; set; }
+
+    /// <summary>
+    /// The request parameters OpenRouter says the model accepts. Null when the catalog
+    /// does not say, which is treated as "a normal chat model".
+    /// </summary>
+    public List<string>? SupportedParameters { get; set; }
 }
 
 public class OpenRouterPricing

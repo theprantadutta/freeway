@@ -2,18 +2,22 @@
 
 ## Project Overview
 
-**Freeway** is a sophisticated **multi-provider AI gateway** built with .NET 10 using Clean Architecture (CQRS pattern with MediatR). It acts as an OpenAI-compatible proxy that intelligently routes requests across 8 AI providers with smart fallback, benchmarking, and usage tracking.
+**Freeway** is a sophisticated **multi-provider AI gateway** built with .NET 10 using Clean Architecture (CQRS pattern with MediatR). It acts as an OpenAI-compatible proxy that intelligently routes requests across 8 AI providers with smart fallback, benchmarking, and usage tracking. Replies come back as one JSON body or, with `"stream": true`, as OpenAI-format server-sent events; both go through the same routing (see [Streaming Request Flow](#streaming-request-flow)).
 
 ---
 
 ## Complete Request Flow for `POST /chat/completions`
+
+Served at `/chat/completions` and `/v1/chat/completions`. This is the non-streaming
+path; a streaming request shares phases 1-5 and differs from there, as described in
+[Streaming Request Flow](#streaming-request-flow).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              REQUEST LIFECYCLE                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 
-    Client Request (X-Api-Key header + JSON body)
+    Client Request (X-Api-Key or Authorization: Bearer <key> + JSON body)
                     │
                     ▼
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -23,8 +27,10 @@
 │  └─► Wraps entire pipeline in try/catch                                    │
 │  └─► Catches unhandled exceptions → JSON error response                    │
 │                                                                            │
-│  ApiKeyAuthenticationMiddleware.cs:31-101                                  │
-│  └─► Extracts X-Api-Key header (line 58)                                   │
+│  ApiKeyAuthenticationMiddleware.cs                                         │
+│  └─► Bearer token: valid JWT → user claims; otherwise treated as a key     │
+│      (how OpenAI SDKs send theirs)                                         │
+│  └─► Otherwise extracts X-Api-Key header (wins if both are sent)           │
 │  └─► Check 1: Is it ADMIN_API_KEY? → Set admin claims                     │
 │  └─► Check 2: Call projectCacheService.ValidateApiKey(apiKey)             │
 │        └─► ProjectCacheService.cs:75-98                                   │
@@ -38,22 +44,23 @@
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  PHASE 2: CONTROLLER LAYER                                                 │
 │  ─────────────────────────────────────────────────────────────────────────│
-│  ChatController.cs:10-31                                                   │
+│  ChatController.cs                                                         │
 │                                                                            │
-│  [HttpPost("/chat/completions")]                                           │
+│  [HttpPost("/chat/completions")] + [HttpPost("/v1/chat/completions")]      │
 │  [RequireProject]  ← Authorization attribute (requires project key)        │
 │                                                                            │
-│  1. Extract projectId from User claims (line 14)                           │
-│  2. Create CreateChatCompletionCommand with all params (lines 16-27)       │
-│  3. Send command via MediatR: await Mediator.Send(command)                 │
-│  4. HandleResult() → returns appropriate HTTP status                       │
+│  1. Extract projectId from User claims                                     │
+│  2. Create CreateChatCompletionCommand with all params                     │
+│     (max_completion_tokens fills in for an absent max_tokens)              │
+│  3. stream=false: await Mediator.Send(command), HandleResult()             │
+│     stream=true:  Send(StreamChatCompletionCommand) → SSE writer           │
 └───────────────────────────────────────────────────────────────────────────┘
                     │
                     ▼
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  PHASE 3: VALIDATION PIPELINE (MediatR Behavior)                           │
 │  ─────────────────────────────────────────────────────────────────────────│
-│  ValidationBehavior.cs:16-39                                               │
+│  ValidationBehavior.cs                                                     │
 │                                                                            │
 │  CreateChatCompletionCommandValidator.cs validates:                        │
 │  └─► ProjectId: NotEmpty                                                   │
@@ -62,21 +69,27 @@
 │  └─► Each message: Role + Content required                                 │
 │  └─► Temperature: 0-2 range (if provided)                                  │
 │  └─► MaxTokens: > 0 (if provided)                                          │
+│  └─► N: must be 1 (if provided)                                            │
 │                                                                            │
 │  Throws ValidationException if failures → 400 Bad Request                  │
+│  (GlobalExceptionHandlerMiddleware maps it; it used to surface as a 500)   │
 └───────────────────────────────────────────────────────────────────────────┘
                     │
                     ▼
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  PHASE 4: COMMAND HANDLER (Core Business Logic)                            │
 │  ─────────────────────────────────────────────────────────────────────────│
-│  CreateChatCompletionCommandHandler.cs:39-128                              │
+│  CreateChatCompletionCommandHandler.cs → ChatRouter.RouteAsync<T>()        │
 │                                                                            │
-│  STEP 1: Convert DTOs to Domain Entities (lines 42-58)                     │
+│  The routing lives in ChatRouter and is generic over what an attempt       │
+│  returns: a ChatCompletionResult here, a ChatCompletionStream for the      │
+│  streaming handler. Each handler only supplies the calls to make.          │
+│                                                                            │
+│  STEP 1: Convert DTOs to Domain Entities (ChatRouter.ToMessages/ToOptions) │
 │  └─► ChatMessageDto[] → ChatMessage[]                                      │
 │  └─► Create ChatCompletionOptions with all params                          │
 │                                                                            │
-│  STEP 2: Route Based on Model Type (line 66)                               │
+│  STEP 2: Route Based on Model Type                                         │
 │  ┌────────────────────────────────────────────────────────────────────┐   │
 │  │  IF model == "free":                                               │   │
 │  │     → Use ProviderOrchestrator.ExecuteWithFallbackAsync()          │   │
@@ -87,11 +100,11 @@
 │  │     → Call OpenRouterService directly                              │   │
 │  └────────────────────────────────────────────────────────────────────┘   │
 │                                                                            │
-│  STEP 3: Fire-and-Forget Usage Logging (line 98)                           │
-│  └─► Task.Run(() => LogUsageInBackgroundAsync(...))                        │
+│  STEP 3: Fire-and-Forget Usage Logging                                     │
+│  └─► ChatUsageLogger.LogInBackground(...)                                  │
 │  └─► Creates new DI scope, saves UsageLog to PostgreSQL                    │
 │                                                                            │
-│  STEP 4: Return Result (lines 100-127)                                     │
+│  STEP 4: Return Result                                                     │
 │  └─► Success: 200 OK with ChatCompletionResponseDto                        │
 │  └─► Failure: 502 Bad Gateway with error message                           │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -104,9 +117,9 @@
 ┌────────────────────┐ ┌────────────────────────────────────────────────────┐
 │ PHASE 5A:          │ │ PHASE 5B: MODEL RESOLUTION                          │
 │ ORCHESTRATOR       │ │ ──────────────────────────────────────────────────│
-│                    │ │ ResolveModel() at line 130-183                     │
+│                    │ │ ChatRouter.ResolveModel()                          │
 │ ProviderOrchestra- │ │                                                     │
-│ tor.cs:30-110      │ │ Priority order:                                    │
+│ tor.cs             │ │ Priority order:                                    │
 │                    │ │ 1. "free" → GetSelectedFreeModel()                 │
 │ 1. Get ranked      │ │ 2. "paid[:tier]" → GetSelectedPaidModel(tier)      │
 │    providers from  │ │    (bare "paid" == "paid:low"; bad tier → 400)     │
@@ -121,16 +134,17 @@
 │    ranked order    │
 │    with retries    │
 │                    │
-│ 4. On failure,     │
-│    fallback to     │
-│    OpenRouter paid │
+│ 4. Then OpenRouter │
+│    zero-cost models│
+│    then 503; never │
+│    a paid model    │
 └────────────────────┘
          │
          ▼
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  PHASE 6: PROVIDER EXECUTION (For "free" model via Orchestrator)           │
 │  ─────────────────────────────────────────────────────────────────────────│
-│  ProviderOrchestrator.cs:30-166                                            │
+│  ProviderOrchestrator.cs (RunAsync<T>, shared by both forms of call)       │
 │                                                                            │
 │  ┌─────────────────────────────────────────────────────────────────────┐  │
 │  │  PROVIDER RANKING (ProviderBenchmarkCache.cs)                       │  │
@@ -146,7 +160,7 @@
 │  ┌─────────────────────────────────────────────────────────────────────┐  │
 │  │  1. Check if provider.IsEnabled (has API key)                       │  │
 │  │  2. Get best model from ProviderModelCache                          │  │
-│  │  3. TryProviderWithRetryAsync() (lines 112-166)                     │  │
+│  │  3. TryProviderWithRetryAsync()                                     │  │
 │  │     └─► Max 2 retries with delays [500ms, 1000ms]                   │  │
 │  │     └─► 429 rate limit → skip to next provider immediately          │  │
 │  │     └─► 4xx client error → skip to next provider immediately        │  │
@@ -166,7 +180,7 @@
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  PHASE 7: INDIVIDUAL PROVIDER API CALL                                     │
 │  ─────────────────────────────────────────────────────────────────────────│
-│  Example: GeminiProvider.cs:34-146                                         │
+│  Example: GeminiProvider.cs                                                │
 │                                                                            │
 │  1. Start stopwatch for timing                                             │
 │  2. Create cancellation token with COMPLETION_TIMEOUT (default 120s)       │
@@ -187,7 +201,7 @@
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  PHASE 8: BACKGROUND USAGE LOGGING                                         │
 │  ─────────────────────────────────────────────────────────────────────────│
-│  CreateChatCompletionCommandHandler.cs:185-250                             │
+│  ChatUsageLogger.cs                                                        │
 │                                                                            │
 │  Fire-and-forget (doesn't block response):                                 │
 │  ┌─────────────────────────────────────────────────────────────────────┐  │
@@ -201,6 +215,7 @@
 │  │     └─► RequestMessages (full conversation)                         │  │
 │  │     └─► ResponseContent (assistant's reply)                         │  │
 │  │     └─► FinishReason, RequestParams                                 │  │
+│  │     └─► Streamed, TimeToFirstTokenMs (streams only)                 │  │
 │  │  4. Save to PostgreSQL usage_logs table                             │  │
 │  └─────────────────────────────────────────────────────────────────────┘  │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -209,8 +224,8 @@
 ┌───────────────────────────────────────────────────────────────────────────┐
 │  PHASE 9: RESPONSE TRANSFORMATION                                          │
 │  ─────────────────────────────────────────────────────────────────────────│
-│  CreateChatCompletionCommandHandler.cs:105-127                             │
-│  BaseApiController.cs:14-35                                                │
+│  CreateChatCompletionCommandHandler.ToDto()                                │
+│  BaseApiController.HandleResult()                                          │
 │                                                                            │
 │  ChatCompletionResult → ChatCompletionResponseDto:                         │
 │  {                                                                         │
@@ -235,8 +250,99 @@
 │  └─► 502 → Bad Gateway (provider errors)                                   │
 │  └─► 503 → Service Unavailable (model not found)                           │
 │  └─► 400 → Bad Request (validation errors)                                 │
+│                                                                            │
+│  Error bodies: {"detail": "...", "error": {message, type, param, code}}    │
+│  ("error" is the object OpenAI SDKs read their message from)               │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Streaming Request Flow
+
+`"stream": true` takes the same route through the gateway — auth, validation, lane
+resolution, local Claude, every fallback chain — and differs only in what an attempt
+returns and in how the reply leaves.
+
+```
+ChatController (stream=true)
+   │
+   ▼
+StreamChatCompletionCommand ──► validated by the same CreateChatCompletionCommandValidator
+   │
+   ▼
+StreamChatCompletionCommandHandler
+   └─► ChatRouter.RouteAsync<ChatCompletionStream>(
+          Free:  orchestrator.StreamWithFallbackAsync
+          Local: localClaude.StreamAsync
+          Paid:  openRouter.StreamChatCompletionAsync)
+   │
+   │   Every attempt is a ChatCompletionStream, which only counts as a
+   │   success once its FIRST DELTA has arrived (ChatCompletionStream.OpenAsync).
+   │   A failure before that is an ordinary failed Result with a status code,
+   │   so retries, 429 cooldowns, skipping providers, local Claude falling
+   │   through to paid, and the final 400/502/503 all behave exactly as for
+   │   a non-streaming request.
+   │
+   ├─► nothing opened ──► JSON error, same status as non-streaming; request logged
+   │
+   ▼
+ChatCompletionStreamSession (open stream + deferred usage logging)
+   │
+   ▼
+ChatCompletionSseWriter (API layer)
+   ├─► 200, text/event-stream, response buffering off, flush per event
+   ├─► chunk: delta {"role":"assistant","content":""}
+   ├─► chunk per content delta  (reasoning deltas keep it alive but are not sent)
+   ├─► chunk: delta {}, finish_reason
+   ├─► chunk: choices [], usage          (only with stream_options.include_usage)
+   └─► data: [DONE]
+       or, if the upstream fails mid-stream: data: {"error": {...}} and no [DONE]
+   │
+   ▼
+session disposed ──► upstream connection released ──► ChatUsageLogger
+                      (streamed = true, time_to_first_token_ms, billed cost from
+                       the final chunk; tokens estimated if the stream was cut short)
+```
+
+### The commit point
+
+The gateway's value is falling back, and a stream can only fall back until the caller
+has been sent something. `ChatCompletionStream.OpenAsync` therefore reads the source
+until its first delta before handing the stream out; anything thrown before then
+becomes the stream's failed `Result` (status code included, via
+`ChatCompletionStreamException`). Every piece of fallback logic — the orchestrator's
+`RunAsync<T>`, `ChatRouter`'s model chain — reads `stream.Result` exactly as it reads
+a `ChatCompletionResult`, which is what lets one copy of the routing serve both.
+
+After the commit, failures cannot be routed around. `ReadAllAsync` records them on
+`Result` instead of throwing, and the writer sends a final `error` event.
+
+### How each backend streams
+
+| Backend | Implementation |
+|---|---|
+| OpenRouter (paid tiers, specific models) | `OpenRouterService.StreamChatCompletionAsync` → `OpenAiChunkStream` |
+| OpenRouter (free lane's zero-cost rung), Groq, Mistral, OpenAI, HuggingFace | `BaseAiProvider.StreamOpenAiCompatibleAsync` → `OpenAiChunkStream` |
+| Gemini | `GeminiProvider` — `streamGenerateContent?alt=sse` |
+| Cohere | `CohereProvider` — v1 chat NDJSON events (`stream-start`, `text-generation`, `stream-end`) |
+| Local Claude Code | `LocalClaudeService.StreamAsync` ← bridge NDJSON ← `claude --output-format stream-json` |
+| Anything else | `BaseAiProvider` default: the finished result replayed as one delta |
+
+`OpenAiChunkStream` folds each chunk's metadata into the live `Result` as it goes —
+the upstream's id and model, OpenRouter's `provider`, `usage` (including OpenRouter's
+billed `cost` and Groq's `x_groq.usage`) — and raises a mid-stream `error` object as a
+failure. `UpstreamStream` sends with `ResponseHeadersRead` and applies
+`COMPLETION_TIMEOUT_SECONDS` as an idle timeout reset on every line, so long answers
+are never cut off at a fixed total.
+
+### Cancellation
+
+The streaming handler is sent `HttpContext.RequestAborted`, and every upstream call
+captures it. A caller hanging up cancels the upstream read, so generation stops; the
+writer marks the stream abandoned, and the request is logged as successful with the
+note `caller disconnected before the reply finished`, its tokens estimated from the
+text produced so far.
 
 ---
 
@@ -245,15 +351,28 @@
 ### 1. Authentication Flow (`ApiKeyAuthenticationMiddleware.cs`)
 
 ```
-X-Api-Key header
+Authorization: Bearer <token>
+       │
+       ├─► Valid JWT? → user claims (web panel)
+       └─► Otherwise the token is used as the API key below
+           (OpenAI SDKs send their key this way)
+
+X-Api-Key header (takes precedence over a Bearer key)
        │
        ├─► Match ADMIN_API_KEY? → admin claims
        │
        └─► ProjectCacheService.ValidateApiKey()
               │
-              └─► For each cached project:
-                     BCrypt.Verify(apiKey, project.ApiKeyHash)
+              ├─► SHA-256(key) already verified, and its project still in the
+              │   current cache under the same hash? → project claims
+              ├─► SHA-256(key) already rejected against this cache snapshot? → 401
+              └─► Otherwise BCrypt.Verify, projects whose stored prefix matches
+                  the key first, then the rest → remember the outcome
                      └─► Match found → project claims (id, name, rate_limit)
+
+  Rotate / deactivate / delete reload the cache, which revokes a remembered
+  key at the same moment it always was: the memo only names a project, and
+  the project is looked up in the current snapshot on every request.
 ```
 
 ### 2. Provider Ranking Algorithm (`ProviderBenchmarkCache.cs`)
@@ -416,6 +535,10 @@ is called.
 │                          ▼                                              │
 │                    HTTP Response (JSON)                                 │
 │                                                                         │
+│  stream=true: provider chunks → ChatCompletionDelta → ChatCompletion-   │
+│  Stream (Result filled in as it is read) → ChatCompletionChunkDto       │
+│  → text/event-stream                                                    │
+│                                                                         │
 │  ─────────────────── PARALLEL ──────────────────                        │
 │                                                                         │
 │                 UsageLog → PostgreSQL                                   │
@@ -437,3 +560,4 @@ is called.
 5. **Fire-and-Forget** - Usage logging doesn't block response
 6. **Claims-based Auth** - Project context flows through claims
 7. **Result Pattern** - `Result<T>` for explicit success/failure handling
+8. **Commit on first token** - A stream is a success only once its first delta is in, so streaming reuses every fallback rule unchanged

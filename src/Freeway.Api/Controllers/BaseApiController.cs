@@ -1,3 +1,4 @@
+using Freeway.Api.Common;
 using Freeway.Application.Common;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
@@ -23,14 +24,15 @@ public abstract class BaseApiController : ControllerBase
             };
         }
 
+        var error = result.Error ?? "Request failed";
         return result.StatusCode switch
         {
-            401 => Unauthorized(new { detail = result.Error }),
+            401 => Unauthorized(ApiError.Body(401, error)),
             403 => Forbid(),
-            404 => NotFound(new { detail = result.Error }),
-            502 => StatusCode(502, new { detail = result.Error }),
-            503 => StatusCode(503, new { detail = result.Error }),
-            _ => BadRequest(new { detail = result.Error })
+            404 => NotFound(ApiError.Body(404, error)),
+            502 => StatusCode(502, ApiError.Body(502, error)),
+            503 => StatusCode(503, ApiError.Body(503, error)),
+            _ => BadRequest(ApiError.Body(400, error))
         };
     }
 }

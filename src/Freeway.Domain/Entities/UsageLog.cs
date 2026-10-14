@@ -59,6 +59,16 @@ public class UsageLog : BaseEntity
     /// provider. Null for anything that was actually billed.
     /// </summary>
     public decimal? AvoidedCostUsd { get; set; }
+    /// <summary>The caller asked for the reply as a stream ("stream": true).</summary>
+    public bool Streamed { get; set; }
+
+    /// <summary>
+    /// For a streamed reply, how long the caller waited for the first piece of it --
+    /// the latency a streaming caller actually feels, where <see cref="ResponseTimeMs"/>
+    /// is the time to the last. Null for anything not streamed.
+    /// </summary>
+    public int? TimeToFirstTokenMs { get; set; }
+
     public List<ChatMessage>? RequestMessages { get; set; }
     public string? ResponseContent { get; set; }
     public string? FinishReason { get; set; }

@@ -39,16 +39,7 @@ public class MistralProvider : BaseAiProvider, IModelFetcher
 
             var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
 
-            var request = new MistralRequest
-            {
-                Model = model,
-                Messages = messages.Select(m => new MistralMessage { Role = m.Role, Content = m.Content }).ToList(),
-                Temperature = options?.Temperature,
-                MaxTokens = options?.MaxTokens,
-                TopP = options?.TopP,
-                Stop = options?.Stop,
-                Stream = false
-            };
+            var request = BuildRequest(model, messages, options);
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.mistral.ai/v1/chat/completions");
             httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
@@ -108,6 +99,34 @@ public class MistralProvider : BaseAiProvider, IModelFetcher
             return CreateErrorResult(ex.Message, (int)stopwatch.ElapsedMilliseconds);
         }
     }
+
+    public override Task<ChatCompletionStream> StreamChatCompletionAsync(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
+        // Mistral rejects fields it does not know, stream_options included, and sends
+        // usage on its last chunk regardless.
+        return StreamOpenAiCompatibleAsync(
+            "https://api.mistral.ai/v1/chat/completions",
+            model,
+            BuildRequest(model, messages, options),
+            "Mistral",
+            requestUsage: false,
+            cancellationToken);
+    }
+
+    private static MistralRequest BuildRequest(string model, List<ChatMessage> messages, ChatCompletionOptions? options) => new()
+    {
+        Model = model,
+        Messages = messages.Select(m => new MistralMessage { Role = m.Role, Content = m.Content }).ToList(),
+        Temperature = options?.Temperature,
+        MaxTokens = options?.MaxTokens,
+        TopP = options?.TopP,
+        Stop = options?.Stop
+    };
 
     public async Task<ProviderModelListResult> FetchModelsAsync(CancellationToken cancellationToken = default)
     {
