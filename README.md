@@ -60,6 +60,12 @@ Freeway supports multiple authentication methods:
 | Project API Key | `X-Api-Key` or `Authorization: Bearer <key>` | Chat completions endpoint |
 | JWT Bearer Token | `Authorization: Bearer <token>` | Web control panel |
 
+Keys are stored as BCrypt hashes. A key is verified once and then remembered by its
+SHA-256 for as long as its project is in the cache, so requests do not pay for BCrypt —
+which they used to, once per project, on every call. Rotating, deactivating or deleting
+a project reloads the cache, and a remembered key stops working at that moment, exactly
+as before.
+
 A key may be sent either way. `Authorization: Bearer` is what every OpenAI SDK sends,
 so a Bearer value that is not a valid login token is checked as an API key. When both
 headers are present, `X-Api-Key` wins.
@@ -185,6 +191,16 @@ A model named in a curated list belongs to that tier regardless of its price, so
 never drifts because upstream changed a number. Every tier keeps the same fallback behaviour
 as before: the selected model first, then `PAID_FALLBACK_COUNT` backups from the rest of the
 tier, with rate-limited models pushed to the back of the queue.
+
+**Only conversational models fill a tier automatically.** The catalog contains
+single-purpose models priced and shaped like chat models — summarisers, extractors,
+code patchers — and for a while the two cheapest in the whole paid band were
+ScaleDown's `summarize` and `extract`, so `paid:low`, being cheapest-first, answered
+"write a story" by echoing the prompt back. A model is now only picked automatically if
+OpenRouter lists at least one of `temperature`, `top_p`, `tools` or `reasoning` among
+its supported parameters. That excludes six of 462 models, all special-purpose, and
+nothing else. Curated models, an admin-selected model and any model named directly in
+a request are unaffected — `"model": "scaledown/summarize"` still works.
 
 Tiers are configurable via `PAID_TIER_LOW_MAX`, `PAID_TIER_MODERATE_MAX`,
 `PAID_TIER_MODERATE_MODELS` and `PAID_TIER_PREMIUM_MODELS` (see `.env.example`).
@@ -570,6 +586,8 @@ Environment variables (see `.env.example`):
 | `LOCAL_CLAUDE_SPILLOVER_TIMEOUT_SECONDS` | No | How long `paid:moderate` waits before using a paid model instead (default: 5). For a stream, the wait for the first token |
 | `BRIDGE_HOURLY_TOKEN_BUDGET` | No | Tokens the bridge may spend per rolling hour. Set, not discovered: the CLI reports no limit (default: 500000) |
 | `BRIDGE_SPILLOVER_SHARE` | No | Share of that budget `paid:moderate` may use; the rest is premium's reserve (default: 0.6) |
+| `BRIDGE_SPILLOVER_MAX_PLAN_UTILIZATION` | No | Stop `paid:moderate` using the subscription once the plan's usage reaches this fraction, e.g. `0.7` (default: no limit) |
+| `BRIDGE_MAX_PLAN_UTILIZATION` | No | Stop all lanes using the subscription once the plan's usage reaches this fraction, e.g. `0.9` (default: no limit) |
 | `CLAUDE_HOME` | No | Home directory holding `.claude` and `.claude.json` to mount (default: `/home/ubuntu`) |
 | `CLAUDE_UID` / `CLAUDE_GID` | No | uid/gid owning those files (default: 1000) |
 | `LOCAL_CLAUDE_URL` | No | Bridge address (default: `http://claude-bridge:8787`) |
@@ -1124,9 +1142,37 @@ Check where it stands at any time:
 
 ```bash
 curl -s https://freeway.pranta.dev/admin/local-claude -H "X-Api-Key: $ADMIN_API_KEY"
-``` The request path only ever reads that cached verdict,
+```
+
+The request path only ever reads that cached verdict,
 so it never blocks on a probe. A real request failing downgrades the verdict
 immediately, which is a better signal than the probe anyway.
+
+### Plan usage
+
+The same endpoint reports how much of the Claude plan itself is used — the five-hour
+and seven-day windows, each with its reset time — read from what Claude Code reports
+on every call:
+
+```json
+"plan": {
+  "status": "allowed_warning",
+  "utilization_percent": 95, "window": "seven_day",
+  "windows": {
+    "five_hour": {"utilization_percent": 45, "resets_at": "2026-10-14T07:00:00Z"},
+    "seven_day": {"utilization_percent": 95, "resets_at": "2026-10-15T01:00:00Z"}
+  },
+  "max_utilization_percent": null, "spillover_max_utilization_percent": 70
+}
+```
+
+That allowance is the one your own interactive Claude Code use draws on, so the bridge
+can be told to stop before it is gone. `BRIDGE_SPILLOVER_MAX_PLAN_UTILIZATION` stops
+`paid:moderate` using the subscription past a fraction of the plan, and
+`BRIDGE_MAX_PLAN_UTILIZATION` stops everything, `use_local_only` included. Either way
+the refusal is instant, does not mark the bridge unhealthy, and the request goes to a
+paid model as it would on any other refusal — except `use_local_only`, which returns
+`503` as always. Both are off unless set.
 
 ### Setup
 

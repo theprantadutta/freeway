@@ -363,9 +363,16 @@ X-Api-Key header (takes precedence over a Bearer key)
        │
        └─► ProjectCacheService.ValidateApiKey()
               │
-              └─► For each cached project:
-                     BCrypt.Verify(apiKey, project.ApiKeyHash)
+              ├─► SHA-256(key) already verified, and its project still in the
+              │   current cache under the same hash? → project claims
+              ├─► SHA-256(key) already rejected against this cache snapshot? → 401
+              └─► Otherwise BCrypt.Verify, projects whose stored prefix matches
+                  the key first, then the rest → remember the outcome
                      └─► Match found → project claims (id, name, rate_limit)
+
+  Rotate / deactivate / delete reload the cache, which revokes a remembered
+  key at the same moment it always was: the memo only names a project, and
+  the project is looked up in the current snapshot on every request.
 ```
 
 ### 2. Provider Ranking Algorithm (`ProviderBenchmarkCache.cs`)
