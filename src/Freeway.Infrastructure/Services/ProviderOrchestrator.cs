@@ -206,6 +206,10 @@ public class ProviderOrchestrator : IProviderOrchestrator
         foreach (var model in _modelCacheService.GetFreeModels())
         {
             if (candidates.Count >= limit) break;
+
+            // Ranked by context length, so a single-purpose model with a huge window
+            // would otherwise sit at the front. The selected model above is taken as is.
+            if (!model.IsGeneralChat) continue;
             Add(model);
         }
 

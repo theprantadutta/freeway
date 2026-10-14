@@ -38,6 +38,12 @@ public class OpenRouterModel
     public OpenRouterPricing Pricing { get; set; } = new();
     public OpenRouterArchitecture? Architecture { get; set; }
     public long? Created { get; set; }
+
+    /// <summary>
+    /// The request parameters OpenRouter says the model accepts. Null when the catalog
+    /// does not say, which is treated as "a normal chat model".
+    /// </summary>
+    public List<string>? SupportedParameters { get; set; }
 }
 
 public class OpenRouterPricing
