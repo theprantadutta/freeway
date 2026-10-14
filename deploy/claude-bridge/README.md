@@ -116,9 +116,28 @@ carries no rate, limit, remaining or reset field anywhere in its output. There i
 nothing to query.
 
 One qualification, found while adding streaming: with `--output-format stream-json`
-the CLI does emit a `rate_limit_event` carrying the plan's `utilization`, window and
-`resetsAt`. Nothing reads it yet. It is the obvious source if the budget is ever to be
-discovered rather than configured.
+the CLI does emit a `rate_limit_event` carrying the plan's utilization and reset time
+for its five-hour and seven-day windows. The bridge now runs every call in that mode
+and reports the figures under `plan` in `/health`. They are the plan's own numbers,
+not this bridge's share of them, so they complement the hourly budget rather than
+replace it.
+
+### Plan ceilings
+
+Two optional settings act on those numbers:
+
+| | refuses | reasonCode |
+|---|---|---|
+| `BRIDGE_SPILLOVER_MAX_PLAN_UTILIZATION` | `spillover` once any live window is at or above it | `plan` |
+| `BRIDGE_MAX_PLAN_UTILIZATION` | everything once any live window is at or above it | `plan` |
+
+Values are fractions (`0.7` is 70%). A window past its reset time is ignored, so a
+stale reading never holds the bridge closed. Like `busy` and `budget`, a `plan` refusal
+is the bridge working as configured: the gateway uses a paid model and does not mark
+the bridge unhealthy. Both are unset by default, which leaves behaviour unchanged.
+
+The subscription behind the bridge is the one used interactively, so these are what
+keep the gateway from spending the week's allowance before its owner does.
 
 At roughly 9.4k tokens a call, the 500,000 default is about 53 calls an hour, of
 which moderate may have 12. Probes count against it too -- they are real calls on
@@ -218,7 +237,7 @@ curl -s -H "Authorization: Bearer $BRIDGE_TOKEN" http://172.17.0.1:8787/health
 
 | method | path | returns |
 |---|---|---|
-| `GET` | `/health` | `{ ok, state, detail, latencyMs, model, checkedAt, cached }` |
+| `GET` | `/health` | `{ ok, state, detail, latencyMs, model, checkedAt, cached, busy, budget, plan }` |
 | `POST` | `/complete` | `{ ok, text, model, listCostUsd, promptTokens, completionTokens, stopReason, durationMs }`, or NDJSON lines with `"stream": true` |
 
 `/complete` takes an optional `priority` of `premium` (the default, so a caller that
@@ -242,11 +261,13 @@ non-streaming reply would; a refusal is a single `error` line with its `reasonCo
 Headers are sent once the call has its slot, so a queued premium caller waits on the
 connection rather than on a stream that has started and says nothing.
 
-The CLI runs with `--output-format stream-json --verbose --include-partial-messages`
-instead of `--output-format json`. That changes only how the answer is printed, not
-the prompt, so the cached prefix and the cost per call are unchanged. The final
-`result` line it prints is the same envelope `json` mode prints, and is read the same
-way. Thinking deltas are dropped, as they are from the final result.
+Every call -- streamed or not, and the health probe -- runs the CLI with
+`--output-format stream-json --verbose --include-partial-messages` rather than
+`--output-format json`. That changes only how the answer is printed, not the prompt,
+so the cached prefix and the cost per call are unchanged; measured cache use per call
+is the same either way. The final `result` line it prints is the same envelope `json`
+mode prints, and is read the same way. Thinking deltas are dropped, as they are from
+the final result.
 
 It does not honour `max_tokens`, and deliberately so. The obvious mechanism,
 `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, does not truncate -- it fails the entire call with

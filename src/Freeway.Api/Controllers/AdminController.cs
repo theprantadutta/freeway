@@ -197,9 +197,31 @@ public class AdminController : BaseApiController
                 spillover_limit = health.Budget.SpilloverLimit,
                 used_percent = Math.Round(health.Budget.UsedPercent, 1),
                 per_call_estimate = health.Budget.Estimate
-            }
+            },
+
+            // Read from Claude Code itself, unlike the budget above: how much of the
+            // plan's five-hour and seven-day allowance is gone, which is the same
+            // allowance interactive use draws on.
+            plan = PlanReport(health.Plan)
         });
     }
+
+    private static object? PlanReport(LocalClaudePlanUsage? plan) => plan is null ? null : new
+    {
+        status = plan.Status,
+        utilization_percent = plan.Utilization is { } u ? Math.Round(u * 100, 1) : (double?)null,
+        window = plan.Window,
+        windows = plan.Windows.ToDictionary(
+            w => w.Key,
+            w => new
+            {
+                utilization_percent = Math.Round(w.Value.Utilization * 100, 1),
+                resets_at = w.Value.ResetsAt is { } r ? DateTimeOffset.FromUnixTimeSeconds(r).UtcDateTime : (DateTime?)null
+            }),
+        seen_at = plan.SeenAt is { } s ? DateTimeOffset.FromUnixTimeMilliseconds(s).UtcDateTime : (DateTime?)null,
+        max_utilization_percent = plan.MaxUtilization * 100,
+        spillover_max_utilization_percent = plan.SpilloverMaxUtilization * 100
+    };
 
     /// <summary>
     /// Probes the bridge now and returns the fresh verdict, rather than waiting for
@@ -228,7 +250,8 @@ public class AdminController : BaseApiController
             detail = health.Detail,
             latency_ms = health.LatencyMs,
             model = health.Model,
-            checked_at = health.CheckedAt
+            checked_at = health.CheckedAt,
+            plan = PlanReport(health.Plan)
         });
     }
 

@@ -126,6 +126,7 @@ public class LocalClaudeService : ILocalClaudeService
                 Model = parsed.Model,
                 Busy = parsed.Busy,
                 Budget = parsed.Budget,
+                Plan = parsed.Plan,
                 CheckedAt = DateTime.UtcNow
             };
             SetHealth(health);
@@ -492,7 +493,9 @@ public class LocalClaudeService : ILocalClaudeService
         return Failed(reason, Stopwatch.StartNew(), spillover, deliberate).ErrorMessage!;
     }
 
-    private static bool IsDeliberate(string? reasonCode) => reasonCode is "busy" or "budget" or "too_slow";
+    // "plan" is a configured ceiling on the subscription's own usage being reached:
+    // policy, like the budget, and no sign that anything is wrong.
+    private static bool IsDeliberate(string? reasonCode) => reasonCode is "busy" or "budget" or "too_slow" or "plan";
 
     /// <summary>Rough characters per token, for cutting a stream at max_tokens.</summary>
     private const int CharsPerToken = 4;
@@ -593,6 +596,7 @@ public class LocalClaudeService : ILocalClaudeService
         public string? Model { get; set; }
         public bool Busy { get; set; }
         public LocalClaudeBudget? Budget { get; set; }
+        public LocalClaudePlanUsage? Plan { get; set; }
     }
 
     private class BridgeStreamLine : BridgeCompletion

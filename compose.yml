@@ -56,6 +56,10 @@ services:
       # CLI, so it is a budget you set -- see deploy/claude-bridge/README.md.
       - BRIDGE_HOURLY_TOKEN_BUDGET=${BRIDGE_HOURLY_TOKEN_BUDGET:-500000}
       - BRIDGE_SPILLOVER_SHARE=${BRIDGE_SPILLOVER_SHARE:-0.6}
+      # Optional ceilings on the plan's own usage (0-1), which the CLI does report.
+      # Empty means no ceiling, the previous behaviour.
+      - BRIDGE_MAX_PLAN_UTILIZATION=${BRIDGE_MAX_PLAN_UTILIZATION:-}
+      - BRIDGE_SPILLOVER_MAX_PLAN_UTILIZATION=${BRIDGE_SPILLOVER_MAX_PLAN_UTILIZATION:-}
     restart: unless-stopped
     networks:
       - internal

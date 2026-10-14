@@ -51,6 +51,24 @@ const SPILLOVER_SHARE = Number(process.env.BRIDGE_SPILLOVER_SHARE || 0.6);
 /** Assumed tokens per call before one has been measured. */
 const DEFAULT_CALL_TOKENS = 9500;
 
+/**
+ * Optional ceilings on how much of the plan itself may be used, as a fraction (0.8 is
+ * 80%). Unlike the hourly budget, these read the real figure: the CLI reports the
+ * plan's utilization over its five-hour and seven-day windows on every call. Past the
+ * spillover ceiling paid:moderate is refused; past the main one, everything is. Both
+ * are off unless set, so an unset bridge behaves exactly as before.
+ *
+ * The subscription this spends is the same one used interactively, so these are what
+ * keep the gateway from using up the week's quota before its owner does.
+ */
+const MAX_PLAN_UTILIZATION = ceiling(process.env.BRIDGE_MAX_PLAN_UTILIZATION);
+const SPILLOVER_MAX_PLAN_UTILIZATION = ceiling(process.env.BRIDGE_SPILLOVER_MAX_PLAN_UTILIZATION);
+
+function ceiling(value) {
+  const n = Number(value);
+  return value && Number.isFinite(n) && n > 0 ? n : null;
+}
+
 // A token is required whenever the bridge is reachable from outside its own
 // network. On a private compose network with no published port there is nothing to
 // defend against, so it is optional there — but say so out loud, because an open
@@ -95,6 +113,70 @@ function record(tokens, durationMs) {
 }
 
 /**
+ * The plan's usage as the CLI last reported it, from the rate_limit_event that
+ * stream-json output carries: utilization and reset time for each window.
+ */
+let planUsage = null;
+
+function recordPlan(info) {
+  if (!info || typeof info !== "object") return;
+  const windows = {};
+  for (const [name, w] of Object.entries(info.unifiedWindows || {})) {
+    if (w && typeof w.utilization === "number") {
+      windows[name] = { utilization: w.utilization, resetsAt: w.resetsAt ?? null };
+    }
+  }
+  if (!Object.keys(windows).length && typeof info.utilization === "number" && info.rateLimitType) {
+    windows[info.rateLimitType] = { utilization: info.utilization, resetsAt: info.resetsAt ?? null };
+  }
+  planUsage = { status: info.status ?? null, windows, seenAt: Date.now() };
+}
+
+/**
+ * The highest utilization across windows that have not reset since they were
+ * reported. A window past its reset time says nothing about now, so it is ignored
+ * rather than holding the bridge closed on a figure that no longer applies.
+ */
+function planUtilization() {
+  if (!planUsage) return null;
+  const nowSeconds = Date.now() / 1000;
+  let highest = null;
+  for (const [name, w] of Object.entries(planUsage.windows)) {
+    if (w.resetsAt && w.resetsAt <= nowSeconds) continue;
+    if (highest === null || w.utilization > highest.utilization) highest = { window: name, ...w };
+  }
+  return highest;
+}
+
+function planReport() {
+  if (!planUsage) return null;
+  const highest = planUtilization();
+  return {
+    ...planUsage,
+    utilization: highest?.utilization ?? null,
+    window: highest?.window ?? null,
+    maxUtilization: MAX_PLAN_UTILIZATION,
+    spilloverMaxUtilization: SPILLOVER_MAX_PLAN_UTILIZATION,
+  };
+}
+
+/** A refusal when the plan is past the ceiling that applies to this priority, else null. */
+function planRefusal(priority) {
+  const limit = priority === "spillover"
+    ? Math.min(SPILLOVER_MAX_PLAN_UTILIZATION ?? Infinity, MAX_PLAN_UTILIZATION ?? Infinity)
+    : MAX_PLAN_UTILIZATION ?? Infinity;
+  const highest = planUtilization();
+  if (!highest || !Number.isFinite(limit) || highest.utilization < limit) return null;
+
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  return {
+    ok: false,
+    reasonCode: "plan",
+    reason: `plan ${highest.window} usage at ${pct(highest.utilization)}, ceiling ${pct(limit)} for ${priority}`,
+  };
+}
+
+/**
  * How long a call is likely to take on this host, from the calls it has actually
  * made. The p90 rather than the median, and deliberately so.
  *
@@ -131,6 +213,9 @@ function expectedDurationMs() {
  */
 function admit(priority, deadlineMs) {
   const b = budget();
+
+  const plan = planRefusal(priority);
+  if (plan) return plan;
 
   if (priority === "spillover") {
     if (inFlight > 0 || waiting.length > 0) {
@@ -214,17 +299,18 @@ const SYSTEM_PROMPT =
  * `--exclude-dynamic-system-prompt-sections` is deliberately absent: the CLI ignores
  * it whenever --system-prompt is given, which is always, here.
  *
- * Streaming swaps only the output format. stream-json (which the CLI will only emit
- * with --verbose) prints one event per line, and --include-partial-messages adds the
- * text as it is generated rather than once per finished message. Neither touches the
- * prompt, so the cached prefix -- and so the cost above -- is the same either way.
+ * The output format is stream-json (which the CLI will only emit with --verbose): one
+ * event per line, with --include-partial-messages adding the text as it is generated.
+ * Neither touches the prompt, so the cached prefix -- and so the cost above -- is the
+ * same as with --output-format json.
  */
-function buildArgs(systemPrompt, stream = false) {
+function buildArgs(systemPrompt) {
   return [
     "-p",
-    ...(stream
-      ? ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
-      : ["--output-format", "json"]),
+    // stream-json for every call, streamed or not: it is also the only output that
+    // reports the plan's utilization (see recordPlan). The result line it ends with is
+    // the same envelope --output-format json prints.
+    "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     "--max-turns", "1",
     "--system-prompt", systemPrompt,
     "--strict-mcp-config",
@@ -286,16 +372,10 @@ ${stderr}`;
 }
 
 /**
- * Picks the answer's text out of one stream-json line, or null for any other event.
+ * Picks the answer's text out of one stream-json event, or null for any other event.
  * Thinking arrives as thinking_delta and is left out, as it is from the final result.
  */
-function textDelta(line) {
-  let event;
-  try {
-    event = JSON.parse(line);
-  } catch {
-    return null;
-  }
+function textDelta(event) {
   const delta = event.type === "stream_event" && event.event?.type === "content_block_delta"
     ? event.event.delta
     : null;
@@ -303,17 +383,17 @@ function textDelta(line) {
 }
 
 /**
- * Runs one call. With onDelta it streams: the answer's text is passed on as it is
- * generated, and the final result -- the same envelope --output-format json prints --
- * arrives as the last line, so everything after that is handled identically.
+ * Runs one call. Output is always stream-json; with onDelta the answer's text is
+ * passed on as it is generated. The final result -- the same envelope
+ * --output-format json prints -- arrives as the last line, and every outcome is read
+ * from it.
  */
 function runClaude(prompt, systemPrompt, { onChild, onDelta } = {}) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const streaming = typeof onDelta === "function";
     let child;
     try {
-      child = spawn(CLAUDE_BIN, buildArgs(systemPrompt, streaming), {
+      child = spawn(CLAUDE_BIN, buildArgs(systemPrompt), {
         cwd: WORKDIR,
 
         // CLAUDE_CODE_MAX_OUTPUT_TOKENS is deliberately NOT set here, though it is
@@ -339,19 +419,27 @@ function runClaude(prompt, systemPrompt, { onChild, onDelta } = {}) {
     let stderr = "";
     let settled = false;
 
-    // In stream mode stdout is one JSON event per line. Lines are handled as they
-    // complete; the result envelope is kept, since it is the line every outcome --
-    // success or failure -- is read from.
+    // stdout is one JSON event per line, handled as each line completes. The result
+    // envelope is kept, since it is the line every outcome -- success or failure -- is
+    // read from.
     let pending = "";
     let resultLine = null;
     const onLine = (line) => {
       if (!line.trim()) return;
-      if (line.includes('"type":"result"')) {
-        resultLine = line;
+      let event;
+      try {
+        event = JSON.parse(line);
+      } catch {
         return;
       }
-      const text = textDelta(line);
-      if (text) onDelta(text);
+      if (event.type === "result") {
+        resultLine = line;
+      } else if (event.type === "rate_limit_event") {
+        recordPlan(event.rate_limit_info);
+      } else if (onDelta) {
+        const text = textDelta(event);
+        if (text) onDelta(text);
+      }
     };
 
     const done = (value) => {
@@ -368,7 +456,6 @@ function runClaude(prompt, systemPrompt, { onChild, onDelta } = {}) {
 
     child.stdout.on("data", (d) => {
       stdout += d;
-      if (!streaming) return;
       pending += d;
       let newline;
       while ((newline = pending.indexOf("\n")) >= 0) {
@@ -381,10 +468,10 @@ function runClaude(prompt, systemPrompt, { onChild, onDelta } = {}) {
 
     child.on("close", (code) => {
       const durationMs = Date.now() - started;
-      if (streaming && pending) onLine(pending);
+      if (pending) onLine(pending);
 
-      // The envelope to read: all of stdout for json, the result line for stream-json.
-      const output = streaming ? resultLine ?? stdout : stdout;
+      // The envelope to read is the result line; all of stdout only if there was none.
+      const output = resultLine ?? stdout;
 
       if (code !== 0) {
         return done({ ok: false, reason: explain(code, output, stderr), durationMs });
@@ -562,6 +649,7 @@ const server = http.createServer(async (req, res) => {
         ...health,
         busy: inFlight > 0 || waiting.length > 0,
         budget: budget(),
+        plan: planReport(),
       });
     } catch (err) {
       return send(res, 200, { ok: false, state: "unavailable", detail: err.message });
@@ -707,5 +795,8 @@ function reportCredentials() {
 
 server.listen(PORT, HOST, () => {
   console.log(`claude-bridge listening on ${HOST}:${PORT} (max ${MAX_CONCURRENT} concurrent, uid ${process.getuid?.() ?? "?"})`);
+  console.log(
+    `plan ceilings: ${MAX_PLAN_UTILIZATION ?? "none"} overall, ${SPILLOVER_MAX_PLAN_UTILIZATION ?? "none"} for spillover`
+  );
   reportCredentials();
 });
