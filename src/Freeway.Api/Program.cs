@@ -8,6 +8,7 @@ using Freeway.Infrastructure;
 using Freeway.Infrastructure.Jobs;
 using Hangfire;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Events;
@@ -85,8 +86,10 @@ try
         })
         .ConfigureApiBehaviorOptions(options =>
         {
-            // A body that does not parse gets the same error shape as everything else,
-            // including the "error" object OpenAI clients read their message from.
+            // A body that does not parse keeps ASP.NET's standard validation response --
+            // type, title, status, errors, traceId, exactly as callers have always got
+            // it -- and gains "detail" and the "error" object OpenAI clients read their
+            // message from, so it reads like every other error this API returns.
             options.InvalidModelStateResponseFactory = context =>
             {
                 var invalid = context.ModelState
@@ -108,7 +111,17 @@ try
                             : error.ErrorMessage))
                     .Distinct();
 
-                return new BadRequestObjectResult(ApiError.Body(StatusCodes.Status400BadRequest, string.Join("; ", problems)));
+                var message = string.Join("; ", problems);
+                var problem = context.HttpContext.RequestServices
+                    .GetRequiredService<ProblemDetailsFactory>()
+                    .CreateValidationProblemDetails(context.HttpContext, context.ModelState);
+                problem.Detail = message;
+                problem.Extensions["error"] = ApiError.Error(StatusCodes.Status400BadRequest, message);
+
+                return new BadRequestObjectResult(problem)
+                {
+                    ContentTypes = { "application/problem+json", "application/problem+xml" }
+                };
             };
         });
 
