@@ -40,16 +40,7 @@ public class HuggingFaceProvider : BaseAiProvider, IModelFetcher
             var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
             var url = $"https://api-inference.huggingface.co/models/{model}/v1/chat/completions";
 
-            var request = new HuggingFaceRequest
-            {
-                Model = model,
-                Messages = messages.Select(m => new HuggingFaceMessage { Role = m.Role, Content = m.Content }).ToList(),
-                Temperature = options?.Temperature,
-                MaxTokens = options?.MaxTokens ?? 500,
-                TopP = options?.TopP,
-                Stop = options?.Stop,
-                Stream = false
-            };
+            var request = BuildRequest(model, messages, options);
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
             httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
@@ -109,6 +100,32 @@ public class HuggingFaceProvider : BaseAiProvider, IModelFetcher
             return CreateErrorResult(ex.Message, (int)stopwatch.ElapsedMilliseconds);
         }
     }
+
+    public override Task<ChatCompletionStream> StreamChatCompletionAsync(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
+        return StreamOpenAiCompatibleAsync(
+            $"https://api-inference.huggingface.co/models/{model}/v1/chat/completions",
+            model,
+            BuildRequest(model, messages, options),
+            "HuggingFace",
+            requestUsage: false,
+            cancellationToken);
+    }
+
+    private static HuggingFaceRequest BuildRequest(string model, List<ChatMessage> messages, ChatCompletionOptions? options) => new()
+    {
+        Model = model,
+        Messages = messages.Select(m => new HuggingFaceMessage { Role = m.Role, Content = m.Content }).ToList(),
+        Temperature = options?.Temperature,
+        MaxTokens = options?.MaxTokens ?? 500,
+        TopP = options?.TopP,
+        Stop = options?.Stop
+    };
 
     public Task<ProviderModelListResult> FetchModelsAsync(CancellationToken cancellationToken = default)
     {

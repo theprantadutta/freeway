@@ -31,10 +31,44 @@ public class ProviderOrchestrator : IProviderOrchestrator
         _logger = logger;
     }
 
-    public async Task<ChatCompletionResult> ExecuteWithFallbackAsync(
+    public Task<ChatCompletionResult> ExecuteWithFallbackAsync(
         List<ChatMessage> messages,
         ChatCompletionOptions? options = null,
         CancellationToken cancellationToken = default)
+    {
+        return RunAsync(
+            (provider, modelId) => provider.CreateChatCompletionAsync(modelId, messages, options, cancellationToken),
+            result => result,
+            failure => failure,
+            cancellationToken);
+    }
+
+    public Task<ChatCompletionStream> StreamWithFallbackAsync(
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        // A stream counts as succeeding once its first delta is in, so everything
+        // below -- retries, skipping on 429, the free-only guard -- applies unchanged
+        // up to that point. After it the caller has the answer underway, and there is
+        // nothing left to fall back from.
+        return RunAsync(
+            (provider, modelId) => provider.StreamChatCompletionAsync(modelId, messages, options, cancellationToken),
+            stream => stream.Result,
+            ChatCompletionStream.Failed,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// The fallback walk, shared by the two forms of call. <paramref name="outcome"/>
+    /// reads how an attempt went; <paramref name="fail"/> wraps the final failure in
+    /// whatever the caller expects back.
+    /// </summary>
+    private async Task<T> RunAsync<T>(
+        Func<IAiProvider, string, Task<T>> call,
+        Func<T, ChatCompletionResult> outcome,
+        Func<ChatCompletionResult, T> fail,
+        CancellationToken cancellationToken)
     {
         var providersDict = _providers.ToDictionary(p => p.Name, p => p);
         var rankedProviders = _benchmarkCache.GetRankedProviders();
@@ -64,7 +98,8 @@ public class ProviderOrchestrator : IProviderOrchestrator
             }
 
             _logger.LogDebug("Using model {Model} for {Provider}", modelId, providerName);
-            var result = await TryProviderWithRetryAsync(provider, modelId, messages, options, cancellationToken);
+            var attempt = await TryProviderWithRetryAsync(provider, modelId, call, outcome, cancellationToken);
+            var result = outcome(attempt);
 
             if (result.Success)
             {
@@ -76,7 +111,7 @@ public class ProviderOrchestrator : IProviderOrchestrator
                 // from a cost we simply never worked out.
                 result.CostUsd = 0m;
                 result.CostSource = "free_tier";
-                return result;
+                return attempt;
             }
 
             errors.Add($"{provider.DisplayName}: {result.ErrorMessage}");
@@ -93,8 +128,9 @@ public class ProviderOrchestrator : IProviderOrchestrator
             foreach (var candidate in BuildOpenRouterFreeCandidates())
             {
                 _logger.LogDebug("Trying OpenRouter free model {Model}", candidate.Id);
-                var result = await TryProviderWithRetryAsync(
-                    openRouter, candidate.Id, messages, options, cancellationToken);
+                var attempt = await TryProviderWithRetryAsync(
+                    openRouter, candidate.Id, call, outcome, cancellationToken);
+                var result = outcome(attempt);
 
                 if (result.Success)
                 {
@@ -104,12 +140,15 @@ public class ProviderOrchestrator : IProviderOrchestrator
                     // If OpenRouter reported what it billed, keep that: it should be
                     // zero here, and if it ever is not, that must be visible rather
                     // than overwritten with an assumption.
+                    //
+                    // A stream learns the billed amount from its last chunk, after this
+                    // runs, and that figure overwrites the assumption made here.
                     if (result.CostSource is null)
                     {
                         result.CostUsd = 0m;
                         result.CostSource = "free_tier";
                     }
-                    return result;
+                    return attempt;
                 }
 
                 errors.Add($"openrouter/{candidate.Id}: {result.ErrorMessage}");
@@ -125,7 +164,7 @@ public class ProviderOrchestrator : IProviderOrchestrator
         // "paid" or "paid:<tier>".
         _logger.LogError("All free providers failed. Errors: {Errors}", string.Join("; ", errors));
 
-        return new ChatCompletionResult
+        return fail(new ChatCompletionResult
         {
             Success = false,
             ErrorMessage =
@@ -135,7 +174,7 @@ public class ProviderOrchestrator : IProviderOrchestrator
             ProviderName = "orchestrator",
             CostUsd = 0m,
             CostSource = "free_tier"
-        };
+        });
     }
 
     /// <summary>
@@ -186,14 +225,14 @@ public class ProviderOrchestrator : IProviderOrchestrator
                && completion == 0m;
     }
 
-    private async Task<ChatCompletionResult> TryProviderWithRetryAsync(
+    private async Task<T> TryProviderWithRetryAsync<T>(
         IAiProvider provider,
         string modelId,
-        List<ChatMessage> messages,
-        ChatCompletionOptions? options,
+        Func<IAiProvider, string, Task<T>> call,
+        Func<T, ChatCompletionResult> outcome,
         CancellationToken cancellationToken)
     {
-        ChatCompletionResult? lastResult = null;
+        T? lastAttempt = default;
 
         for (int attempt = 0; attempt <= MaxRetries; attempt++)
         {
@@ -205,20 +244,17 @@ public class ProviderOrchestrator : IProviderOrchestrator
                 await Task.Delay(delay, cancellationToken);
             }
 
-            lastResult = await provider.CreateChatCompletionAsync(
-                modelId,
-                messages,
-                options,
-                cancellationToken);
+            lastAttempt = await call(provider, modelId);
+            var lastResult = outcome(lastAttempt);
 
             if (lastResult.Success)
-                return lastResult;
+                return lastAttempt;
 
             // Check for rate limit (429) - immediately skip to next provider, no retry
             if (lastResult.HttpStatusCode == 429)
             {
                 _logger.LogWarning("{Provider} rate limited (429), skipping to next provider", provider.Name);
-                return lastResult;
+                return lastAttempt;
             }
 
             // Check for client errors (4xx except 429) - skip to next provider, no retry
@@ -226,7 +262,7 @@ public class ProviderOrchestrator : IProviderOrchestrator
             {
                 _logger.LogWarning("{Provider} client error ({StatusCode}), skipping to next provider",
                     provider.Name, lastResult.HttpStatusCode);
-                return lastResult;
+                return lastAttempt;
             }
 
             // Server errors (5xx) or timeouts - retry
@@ -234,11 +270,7 @@ public class ProviderOrchestrator : IProviderOrchestrator
                 provider.Name, attempt + 1, lastResult.ErrorMessage);
         }
 
-        return lastResult ?? new ChatCompletionResult
-        {
-            Success = false,
-            ErrorMessage = "Unknown error",
-            ProviderName = provider.Name
-        };
+        // The loop always runs at least once, so there is always a last attempt.
+        return lastAttempt!;
     }
 }

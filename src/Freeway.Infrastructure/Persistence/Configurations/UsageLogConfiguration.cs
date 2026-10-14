@@ -54,6 +54,16 @@ public class UsageLogConfiguration : IEntityTypeConfiguration<UsageLog>
         builder.Property(u => u.RequestedMaxTokens)
             .HasColumnName("requested_max_tokens");
 
+        // Whether the caller asked for a stream. Every row before streaming existed
+        // was, correctly, not one, so false is the right value to backfill.
+        builder.Property(u => u.Streamed)
+            .HasColumnName("streamed")
+            .HasDefaultValue(false);
+
+        // Only meaningful for streamed rows; null everywhere else.
+        builder.Property(u => u.TimeToFirstTokenMs)
+            .HasColumnName("time_to_first_token_ms");
+
         // Only set on rows served out of a subscription.
         builder.Property(u => u.AvoidedCostUsd)
             .HasColumnName("avoided_cost_usd")

@@ -33,6 +33,18 @@ public interface ILocalClaudeService
         ChatCompletionOptions? options = null,
         LocalClaudePriority priority = LocalClaudePriority.Premium,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Streams a completion as Claude Code writes it. Like <see cref="CompleteAsync"/>
+    /// it never throws: a stream that cannot open comes back failed, with a reason.
+    /// For spillover the short deadline applies to the first delta only; once the
+    /// answer is arriving it is allowed to finish.
+    /// </summary>
+    Task<ChatCompletionStream> StreamAsync(
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        LocalClaudePriority priority = LocalClaudePriority.Premium,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

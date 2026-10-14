@@ -1,6 +1,30 @@
-@freeway_HostAddress = http://localhost:5031
+@freeway_HostAddress = http://localhost:8080
+@projectKey = fw_your-project-key
 
-GET {{freeway_HostAddress}}/weatherforecast/
-Accept: application/json
+### Chat completion
+POST {{freeway_HostAddress}}/v1/chat/completions
+Authorization: Bearer {{projectKey}}
+Content-Type: application/json
+
+{
+  "model": "free",
+  "messages": [{"role": "user", "content": "Hello!"}]
+}
+
+### Streamed chat completion (server-sent events, ending in data: [DONE])
+POST {{freeway_HostAddress}}/v1/chat/completions
+Authorization: Bearer {{projectKey}}
+Content-Type: application/json
+
+{
+  "model": "paid:moderate",
+  "stream": true,
+  "stream_options": {"include_usage": true},
+  "messages": [{"role": "user", "content": "Count to ten."}]
+}
+
+### Models, in OpenAI's list format
+GET {{freeway_HostAddress}}/v1/models
+Authorization: Bearer {{projectKey}}
 
 ###

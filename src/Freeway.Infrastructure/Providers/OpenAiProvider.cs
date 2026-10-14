@@ -41,18 +41,7 @@ public class OpenAiProvider : BaseAiProvider, IModelFetcher
 
             var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
 
-            var request = new OpenAiRequest
-            {
-                Model = model,
-                Messages = messages.Select(m => new OpenAiMessage { Role = m.Role, Content = m.Content }).ToList(),
-                Temperature = options?.Temperature,
-                MaxTokens = options?.MaxTokens,
-                TopP = options?.TopP,
-                FrequencyPenalty = options?.FrequencyPenalty,
-                PresencePenalty = options?.PresencePenalty,
-                Stop = options?.Stop,
-                Stream = false
-            };
+            var request = BuildRequest(model, messages, options);
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions");
             httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
@@ -112,6 +101,35 @@ public class OpenAiProvider : BaseAiProvider, IModelFetcher
             return CreateErrorResult(ex.Message, (int)stopwatch.ElapsedMilliseconds);
         }
     }
+
+    public override Task<ChatCompletionStream> StreamChatCompletionAsync(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
+        // OpenAI omits usage from a stream unless it is asked for.
+        return StreamOpenAiCompatibleAsync(
+            "https://api.openai.com/v1/chat/completions",
+            model,
+            BuildRequest(model, messages, options),
+            "OpenAI",
+            requestUsage: true,
+            cancellationToken);
+    }
+
+    private static OpenAiRequest BuildRequest(string model, List<ChatMessage> messages, ChatCompletionOptions? options) => new()
+    {
+        Model = model,
+        Messages = messages.Select(m => new OpenAiMessage { Role = m.Role, Content = m.Content }).ToList(),
+        Temperature = options?.Temperature,
+        MaxTokens = options?.MaxTokens,
+        TopP = options?.TopP,
+        FrequencyPenalty = options?.FrequencyPenalty,
+        PresencePenalty = options?.PresencePenalty,
+        Stop = options?.Stop
+    };
 
     public async Task<ProviderModelListResult> FetchModelsAsync(CancellationToken cancellationToken = default)
     {

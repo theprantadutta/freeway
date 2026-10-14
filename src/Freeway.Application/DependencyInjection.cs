@@ -18,6 +18,10 @@ public static class DependencyInjection
         // Register FluentValidation validators
         services.AddValidatorsFromAssembly(assembly);
 
+        // Chat routing, shared by the streaming and non-streaming endpoints
+        services.AddScoped<Features.Chat.ChatRouter>();
+        services.AddScoped<Features.Chat.ChatUsageLogger>();
+
         // Register validation pipeline behavior
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 

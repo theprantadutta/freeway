@@ -1,11 +1,13 @@
 using System.Text.Json;
 using DotNetEnv;
+using Freeway.Api.Common;
 using Freeway.Api.Middleware;
 using Freeway.Application;
 using Freeway.Domain.Interfaces;
 using Freeway.Infrastructure;
 using Freeway.Infrastructure.Jobs;
 using Hangfire;
+using Microsoft.AspNetCore.Mvc;
 using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Events;
@@ -80,6 +82,34 @@ try
         {
             options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
             options.JsonSerializerOptions.DictionaryKeyPolicy = JsonNamingPolicy.SnakeCaseLower;
+        })
+        .ConfigureApiBehaviorOptions(options =>
+        {
+            // A body that does not parse gets the same error shape as everything else,
+            // including the "error" object OpenAI clients read their message from.
+            options.InvalidModelStateResponseFactory = context =>
+            {
+                var invalid = context.ModelState
+                    .Where(entry => entry.Value is { Errors.Count: > 0 })
+                    .ToList();
+
+                // When the body itself failed to parse, the errors keyed by JSON path
+                // ("$.messages[0].content") say why; the "request field is required"
+                // that comes with them only says the body was unusable.
+                if (invalid.Any(entry => entry.Key.StartsWith('$')))
+                {
+                    invalid = invalid.Where(entry => entry.Key.StartsWith('$')).ToList();
+                }
+
+                var problems = invalid
+                    .SelectMany(entry => entry.Value!.Errors.Select(error =>
+                        string.IsNullOrWhiteSpace(error.ErrorMessage)
+                            ? $"Invalid value for '{entry.Key}'."
+                            : error.ErrorMessage))
+                    .Distinct();
+
+                return new BadRequestObjectResult(ApiError.Body(StatusCodes.Status400BadRequest, string.Join("; ", problems)));
+            };
         });
 
     // OpenAPI
@@ -137,13 +167,15 @@ try
         app.MapScalarApiReference();
     }
 
-    app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
-
-    // Serilog request logging
+    // Serilog request logging. Outside the exception handler, so it records the
+    // status the caller actually received: inside it, an exception the handler turns
+    // into a 400 (a failed validation, say) was logged as a 500 with a stack trace.
     app.UseSerilogRequestLogging(options =>
     {
         options.MessageTemplate = "{RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
     });
+
+    app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
 
     app.UseCors();
     app.UseMiddleware<ApiKeyAuthenticationMiddleware>();

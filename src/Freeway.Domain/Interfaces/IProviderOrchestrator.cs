@@ -12,4 +12,13 @@ public interface IProviderOrchestrator
         List<ChatMessage> messages,
         ChatCompletionOptions? options = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The streaming form of <see cref="ExecuteWithFallbackAsync"/>: the same providers
+    /// in the same order, falling through until one of them produces a first delta.
+    /// </summary>
+    Task<ChatCompletionStream> StreamWithFallbackAsync(
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default);
 }

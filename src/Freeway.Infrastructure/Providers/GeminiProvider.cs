@@ -1,8 +1,11 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Text;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Freeway.Domain.Entities;
 using Freeway.Domain.Interfaces;
+using Freeway.Infrastructure.Streaming;
 using Microsoft.Extensions.Logging;
 
 namespace Freeway.Infrastructure.Providers;
@@ -47,45 +50,7 @@ public class GeminiProvider : BaseAiProvider, IModelFetcher
             var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
             var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_apiKey}";
 
-            // Convert messages to Gemini format
-            var contents = new List<GeminiContent>();
-            string? systemInstruction = null;
-
-            foreach (var msg in messages)
-            {
-                if (msg.Role == "system")
-                {
-                    systemInstruction = msg.Content;
-                }
-                else
-                {
-                    contents.Add(new GeminiContent
-                    {
-                        Role = msg.Role == "assistant" ? "model" : "user",
-                        Parts = new List<GeminiPart> { new() { Text = msg.Content } }
-                    });
-                }
-            }
-
-            var request = new GeminiRequest
-            {
-                Contents = contents,
-                GenerationConfig = new GeminiGenerationConfig
-                {
-                    Temperature = options?.Temperature,
-                    MaxOutputTokens = options?.MaxTokens,
-                    TopP = options?.TopP,
-                    StopSequences = options?.Stop
-                }
-            };
-
-            if (!string.IsNullOrEmpty(systemInstruction))
-            {
-                request.SystemInstruction = new GeminiContent
-                {
-                    Parts = new List<GeminiPart> { new() { Text = systemInstruction } }
-                };
-            }
+            var request = BuildRequest(messages, options);
 
             var response = await HttpClient.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
             stopwatch.Stop();
@@ -143,6 +108,167 @@ public class GeminiProvider : BaseAiProvider, IModelFetcher
             Logger.LogError(ex, "Gemini API request failed");
             return CreateErrorResult(ex.Message, (int)stopwatch.ElapsedMilliseconds);
         }
+    }
+
+
+    private static GeminiRequest BuildRequest(List<ChatMessage> messages, ChatCompletionOptions? options)
+    {
+        // Convert messages to Gemini format
+        var contents = new List<GeminiContent>();
+        string? systemInstruction = null;
+
+        foreach (var msg in messages)
+        {
+            if (msg.Role == "system")
+            {
+                systemInstruction = msg.Content;
+            }
+            else
+            {
+                contents.Add(new GeminiContent
+                {
+                    Role = msg.Role == "assistant" ? "model" : "user",
+                    Parts = new List<GeminiPart> { new() { Text = msg.Content } }
+                });
+            }
+        }
+
+        var request = new GeminiRequest
+        {
+            Contents = contents,
+            GenerationConfig = new GeminiGenerationConfig
+            {
+                Temperature = options?.Temperature,
+                MaxOutputTokens = options?.MaxTokens,
+                TopP = options?.TopP,
+                StopSequences = options?.Stop
+            }
+        };
+
+        if (!string.IsNullOrEmpty(systemInstruction))
+        {
+            request.SystemInstruction = new GeminiContent
+            {
+                Parts = new List<GeminiPart> { new() { Text = systemInstruction } }
+            };
+        }
+
+        return request;
+    }
+
+    public override Task<ChatCompletionStream> StreamChatCompletionAsync(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
+        var result = UpstreamStream.NewResult(Name, model);
+
+        return ChatCompletionStream.OpenAsync(
+            result,
+            ReadStreamAsync(model, BuildRequest(messages, options), result, cancellationToken));
+    }
+
+    /// <summary>
+    /// Gemini's own streaming form: alt=sse turns streamGenerateContent into server-sent
+    /// events, each one a partial GenerateContentResponse.
+    /// </summary>
+    private async IAsyncEnumerable<ChatCompletionDelta> ReadStreamAsync(
+        string model,
+        GeminiRequest request,
+        ChatCompletionResult result,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var idleTimeout = TimeSpan.FromSeconds(CompletionTimeout);
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        idle.CancelAfter(idleTimeout);
+
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={_apiKey}";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = JsonContent.Create(request, options: JsonOptions)
+        };
+        using var response = await UpstreamStream.SendAsync(HttpClient, httpRequest, "Gemini", Logger, idle.Token);
+
+        await foreach (var data in UpstreamStream.ReadSseDataAsync(response, idle, idleTimeout, idle.Token))
+        {
+            var delta = ParseStreamEvent(data, result);
+            if (delta is not null)
+            {
+                yield return delta;
+            }
+        }
+    }
+
+    private static ChatCompletionDelta? ParseStreamEvent(string data, ChatCompletionResult result)
+    {
+        using var document = JsonDocument.Parse(data);
+        var root = document.RootElement;
+
+        if (root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
+        {
+            var message = error.TryGetProperty("message", out var m) ? m.GetString() : error.GetRawText();
+            int? code = error.TryGetProperty("code", out var c) && c.TryGetInt32(out var n) ? n : null;
+            throw new ChatCompletionStreamException($"Gemini stream error: {message}", code);
+        }
+
+        // Each event carries the running totals, so the last one wins.
+        if (root.TryGetProperty("usageMetadata", out var usage) && usage.ValueKind == JsonValueKind.Object)
+        {
+            var prompt = usage.TryGetProperty("promptTokenCount", out var p) ? p.GetInt32() : 0;
+            var completion = usage.TryGetProperty("candidatesTokenCount", out var o) ? o.GetInt32() : 0;
+            var total = usage.TryGetProperty("totalTokenCount", out var t) ? t.GetInt32() : prompt + completion;
+            result.Usage = new ChatCompletionUsage
+            {
+                PromptTokens = prompt,
+                CompletionTokens = completion,
+                TotalTokens = total
+            };
+        }
+
+        if (!root.TryGetProperty("candidates", out var candidates) ||
+            candidates.ValueKind != JsonValueKind.Array ||
+            candidates.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        var candidate = candidates[0];
+        var finish = candidate.TryGetProperty("finishReason", out var f) && f.ValueKind == JsonValueKind.String
+            ? MapFinishReason(f.GetString())
+            : null;
+
+        var text = new StringBuilder();
+        var thinking = false;
+        if (candidate.TryGetProperty("content", out var content) &&
+            content.TryGetProperty("parts", out var parts) &&
+            parts.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var part in parts.EnumerateArray())
+            {
+                if (!part.TryGetProperty("text", out var partText) || partText.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                // Thought summaries are reasoning, left out exactly as they are elsewhere.
+                if (part.TryGetProperty("thought", out var thought) && thought.ValueKind == JsonValueKind.True)
+                {
+                    thinking = true;
+                    continue;
+                }
+
+                text.Append(partText.GetString());
+            }
+        }
+
+        if (text.Length > 0 || finish is not null)
+        {
+            return new ChatCompletionDelta { Content = text.ToString(), FinishReason = finish };
+        }
+
+        return thinking ? new ChatCompletionDelta { IsReasoning = true } : null;
     }
 
     private static string? MapFinishReason(string? geminiReason)

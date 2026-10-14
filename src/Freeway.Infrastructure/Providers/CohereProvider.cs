@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Freeway.Domain.Entities;
 using Freeway.Domain.Interfaces;
+using Freeway.Infrastructure.Streaming;
 using Microsoft.Extensions.Logging;
 
 namespace Freeway.Infrastructure.Providers;
@@ -39,44 +41,7 @@ public class CohereProvider : BaseAiProvider, IModelFetcher
 
             var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
 
-            // Convert messages to Cohere format
-            var chatHistory = new List<CohereChatMessage>();
-            string? systemMessage = null;
-            string userMessage = "";
-
-            foreach (var msg in messages)
-            {
-                if (msg.Role == "system")
-                {
-                    systemMessage = msg.Content;
-                }
-                else if (msg.Role == "user")
-                {
-                    // Last user message becomes the main message
-                    if (!string.IsNullOrEmpty(userMessage))
-                    {
-                        chatHistory.Add(new CohereChatMessage { Role = "USER", Message = userMessage });
-                    }
-                    userMessage = msg.Content;
-                }
-                else if (msg.Role == "assistant")
-                {
-                    chatHistory.Add(new CohereChatMessage { Role = "CHATBOT", Message = msg.Content });
-                }
-            }
-
-            var request = new CohereRequest
-            {
-                Model = model,
-                Message = userMessage,
-                ChatHistory = chatHistory.Count > 0 ? chatHistory : null,
-                Preamble = systemMessage,
-                Temperature = options?.Temperature,
-                MaxTokens = options?.MaxTokens,
-                P = options?.TopP,
-                StopSequences = options?.Stop,
-                Stream = false
-            };
+            var request = BuildRequest(model, messages, options);
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.cohere.ai/v1/chat");
             httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
@@ -138,6 +103,139 @@ public class CohereProvider : BaseAiProvider, IModelFetcher
             stopwatch.Stop();
             Logger.LogError(ex, "Cohere API request failed");
             return CreateErrorResult(ex.Message, (int)stopwatch.ElapsedMilliseconds);
+        }
+    }
+
+
+    private static CohereRequest BuildRequest(string model, List<ChatMessage> messages, ChatCompletionOptions? options)
+    {
+        // Convert messages to Cohere format
+        var chatHistory = new List<CohereChatMessage>();
+        string? systemMessage = null;
+        string userMessage = "";
+
+        foreach (var msg in messages)
+        {
+            if (msg.Role == "system")
+            {
+                systemMessage = msg.Content;
+            }
+            else if (msg.Role == "user")
+            {
+                // Last user message becomes the main message
+                if (!string.IsNullOrEmpty(userMessage))
+                {
+                    chatHistory.Add(new CohereChatMessage { Role = "USER", Message = userMessage });
+                }
+                userMessage = msg.Content;
+            }
+            else if (msg.Role == "assistant")
+            {
+                chatHistory.Add(new CohereChatMessage { Role = "CHATBOT", Message = msg.Content });
+            }
+        }
+
+        var request = new CohereRequest
+        {
+            Model = model,
+            Message = userMessage,
+            ChatHistory = chatHistory.Count > 0 ? chatHistory : null,
+            Preamble = systemMessage,
+            Temperature = options?.Temperature,
+            MaxTokens = options?.MaxTokens,
+            P = options?.TopP,
+            StopSequences = options?.Stop
+        };
+
+        return request;
+    }
+
+    public override Task<ChatCompletionStream> StreamChatCompletionAsync(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var model = string.IsNullOrEmpty(modelId) ? DefaultModelId : modelId;
+        var request = BuildRequest(model, messages, options);
+        request.Stream = true;
+
+        var result = UpstreamStream.NewResult(Name, model);
+        return ChatCompletionStream.OpenAsync(result, ReadStreamAsync(request, result, cancellationToken));
+    }
+
+    /// <summary>
+    /// Cohere's v1 chat streams newline-delimited JSON rather than server-sent events:
+    /// stream-start, then text-generation per piece, then stream-end with the totals.
+    /// </summary>
+    private async IAsyncEnumerable<ChatCompletionDelta> ReadStreamAsync(
+        CohereRequest request,
+        ChatCompletionResult result,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var idleTimeout = TimeSpan.FromSeconds(CompletionTimeout);
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        idle.CancelAfter(idleTimeout);
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.cohere.ai/v1/chat");
+        httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
+        httpRequest.Content = JsonContent.Create(request, options: JsonOptions);
+        using var response = await UpstreamStream.SendAsync(HttpClient, httpRequest, "Cohere", Logger, idle.Token);
+
+        await foreach (var line in UpstreamStream.ReadLinesAsync(response, idle, idleTimeout, idle.Token))
+        {
+            var delta = ParseStreamEvent(line, result);
+            if (delta is not null)
+            {
+                yield return delta;
+            }
+        }
+    }
+
+    private static ChatCompletionDelta? ParseStreamEvent(string line, ChatCompletionResult result)
+    {
+        using var document = JsonDocument.Parse(line);
+        var root = document.RootElement;
+        var eventType = root.TryGetProperty("event_type", out var e) ? e.GetString() : null;
+
+        switch (eventType)
+        {
+            case "stream-start":
+                if (root.TryGetProperty("generation_id", out var id) && id.GetString() is { Length: > 0 } generationId)
+                {
+                    result.Id = generationId;
+                }
+                return null;
+
+            case "text-generation":
+                var text = root.TryGetProperty("text", out var t) ? t.GetString() : null;
+                return string.IsNullOrEmpty(text) ? null : new ChatCompletionDelta { Content = text };
+
+            case "stream-end":
+                var finish = root.TryGetProperty("finish_reason", out var f) ? f.GetString() : null;
+                if (finish is "ERROR" or "ERROR_TOXIC")
+                {
+                    throw new ChatCompletionStreamException($"Cohere stream error: {finish}");
+                }
+
+                if (root.TryGetProperty("response", out var final) &&
+                    final.TryGetProperty("meta", out var meta) &&
+                    meta.TryGetProperty("billed_units", out var billed))
+                {
+                    var input = billed.TryGetProperty("input_tokens", out var i) ? (int)i.GetDouble() : 0;
+                    var output = billed.TryGetProperty("output_tokens", out var o) ? (int)o.GetDouble() : 0;
+                    result.Usage = new ChatCompletionUsage
+                    {
+                        PromptTokens = input,
+                        CompletionTokens = output,
+                        TotalTokens = input + output
+                    };
+                }
+
+                return new ChatCompletionDelta { FinishReason = MapFinishReason(finish) ?? "stop" };
+
+            default:
+                return null;
         }
     }
 

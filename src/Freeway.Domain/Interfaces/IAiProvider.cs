@@ -37,4 +37,15 @@ public interface IAiProvider
         List<ChatMessage> messages,
         ChatCompletionOptions? options = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stream a chat completion using this provider. Providers without native
+    /// streaming replay a finished completion as a single delta, so every provider
+    /// can serve a streaming request.
+    /// </summary>
+    Task<ChatCompletionStream> StreamChatCompletionAsync(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default);
 }

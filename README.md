@@ -5,7 +5,8 @@ A multi-provider AI Gateway with project management, usage tracking, analytics, 
 ## Overview
 
 Freeway is a full-featured AI Gateway built with .NET 10 that:
-- Proxies chat completion requests to multiple AI providers (OpenRouter, OpenAI, Gemini, Groq, Mistral, Cohere, HuggingFace)
+- Proxies chat completion requests to multiple AI providers (OpenRouter, OpenAI, Gemini, Groq, Mistral, Cohere, HuggingFace), as one JSON reply or streamed token by token
+- Speaks the OpenAI API: any OpenAI SDK works against it by changing the base URL and key
 - Manages projects with individual API keys
 - Tracks usage, costs, and analytics per project
 - Automatically selects best free, cheapest paid, and cheapest image generation models
@@ -14,7 +15,9 @@ Freeway is a full-featured AI Gateway built with .NET 10 that:
 
 ## Features
 
-- **OpenAI-Compatible Chat Endpoint**: `POST /chat/completions` with model selection (`free`, `paid`, `paid:low`, `paid:moderate`, `paid:premium`, `image`, or specific model ID)
+- **OpenAI-Compatible Chat Endpoint**: `POST /chat/completions` (also `/v1/chat/completions`) with model selection (`free`, `paid`, `paid:low`, `paid:moderate`, `paid:premium`, `image`, or specific model ID)
+- **Streaming**: `"stream": true` returns OpenAI-format server-sent events on every lane, with the same fallback chain up to the first token and usage on request via `stream_options`
+- **OpenAI SDK Compatible**: Point the official Python/Node SDKs (or anything built on them) at `https://<host>/v1` with a project key; streaming, `models.list()`, errors and content-part messages all behave as the SDKs expect
 - **Multi-Provider Support**: Fallback across 8 AI providers for reliability
 - **Project Management**: Create projects with individual API keys, rate limits, and metadata
 - **Usage Tracking**: Logs all requests with tokens, costs, and response times
@@ -54,8 +57,12 @@ Freeway supports multiple authentication methods:
 | Method | Header/Cookie | Used For |
 |--------|---------------|----------|
 | Admin API Key | `X-Api-Key` | Admin endpoints, model info, CLI tools |
-| Project API Key | `X-Api-Key` | Chat completions endpoint |
+| Project API Key | `X-Api-Key` or `Authorization: Bearer <key>` | Chat completions endpoint |
 | JWT Bearer Token | `Authorization: Bearer <token>` | Web control panel |
+
+A key may be sent either way. `Authorization: Bearer` is what every OpenAI SDK sends,
+so a Bearer value that is not a valid login token is checked as an API key. When both
+headers are present, `X-Api-Key` wins.
 
 ### JWT Authentication (Web Panel)
 
@@ -83,9 +90,11 @@ POST /auth/login
 
 ```bash
 POST /chat/completions
+POST /v1/chat/completions    # same endpoint, for clients whose base URL ends in /v1
 ```
 
-OpenAI-compatible chat completion endpoint.
+OpenAI-compatible chat completion endpoint. Send `"stream": true` to receive the reply
+as server-sent events instead of one JSON body — see [Streaming](#streaming).
 
 **Request:**
 ```json
@@ -99,11 +108,20 @@ OpenAI-compatible chat completion endpoint.
 }
 ```
 
+**Standard OpenAI parameters:** `model`, `messages`, `temperature`, `max_tokens`,
+`max_completion_tokens` (used when `max_tokens` is absent), `top_p`,
+`frequency_penalty`, `presence_penalty`, `stop`, `n` (only `1`), `stream` and
+`stream_options`.
+
+| field | type | meaning |
+|---|---|---|
+| `stream` | bool | Reply as server-sent `chat.completion.chunk` events ending in `data: [DONE]`. Works on every lane; see [Streaming](#streaming). |
+| `stream_options` | object | `{"include_usage": true}` adds a final chunk with empty `choices` and the request's `usage`, before `[DONE]`. The only way a stream reports token counts, exactly as with OpenAI. |
+
 **Extra parameters (beyond the OpenAI shape):**
 
 | field | type | meaning |
 |---|---|---|
-| `stream` | bool | **Not supported.** Sending `true` returns `400`. It used to be forwarded upstream while the reply was still parsed as one JSON body, which produced a broken response rather than a stream. |
 | `reasoning` | object | Reasoning effort for models that think before answering, passed straight through (e.g. `{"effort": "low"}`). Usually the largest cost lever available on such a model — see below. Models that don't reason ignore it. |
 | `use_local_only` | bool | Serve from the local Claude Code subscription or fail. Never falls back to a paid model, so the request cannot quietly cost money. `503` if the subscription is unavailable, throttled or out of hourly budget; `400` for image models, which it cannot generate. |
 
@@ -195,6 +213,190 @@ Tiers are configurable via `PAID_TIER_LOW_MAX`, `PAID_TIER_MODERATE_MAX`,
 }
 ```
 
+**Errors** carry both this API's `detail` and the `error` object OpenAI clients read,
+so an SDK raises with the actual reason rather than a dump of the body:
+
+```json
+{
+  "detail": "Unknown paid tier 'paid:bogus'. Valid values are ...",
+  "error": {"message": "Unknown paid tier 'paid:bogus'. Valid values are ...", "type": "invalid_request_error", "param": null, "code": 400}
+}
+```
+
+### Streaming
+
+Set `"stream": true` and the reply arrives as server-sent events in OpenAI's format,
+on every lane — `free`, every paid tier, a specific model, and local Claude.
+
+```bash
+curl -N https://freeway.pranta.dev/v1/chat/completions \
+  -H "Authorization: Bearer $FREEWAY_PROJECT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"paid:moderate","stream":true,"stream_options":{"include_usage":true},
+       "messages":[{"role":"user","content":"Count to five."}]}'
+```
+
+```
+data: {"id":"gen-...","object":"chat.completion.chunk","created":1791956946,"model":"openai/gpt-5-mini","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"gen-...","object":"chat.completion.chunk","created":1791956946,"model":"openai/gpt-5-mini","choices":[{"index":0,"delta":{"content":"1, 2,"},"finish_reason":null}]}
+
+data: {"id":"gen-...","object":"chat.completion.chunk","created":1791956946,"model":"openai/gpt-5-mini","choices":[{"index":0,"delta":{"content":" 3, 4, 5"},"finish_reason":null}]}
+
+data: {"id":"gen-...","object":"chat.completion.chunk","created":1791956946,"model":"openai/gpt-5-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"gen-...","object":"chat.completion.chunk","created":1791956946,"model":"openai/gpt-5-mini","choices":[],"usage":{"prompt_tokens":14,"completion_tokens":9,"total_tokens":23}}
+
+data: [DONE]
+```
+
+**Fallback works until the first token.** A stream is only handed to the caller once
+its first piece has arrived. Until then a streaming request is routed, retried and
+failed over exactly like any other — the free lane's provider rotation, a paid tier's
+backup models, local Claude falling through to a paid model — and if nothing can serve
+it, the response is an ordinary JSON error with the same status code a non-streaming
+request would get (`400`, `502`, `503`). Once text is flowing there is nothing left to
+fall back from.
+
+**`[DONE]` means complete.** If the upstream fails after the stream has started, the
+last event is an error instead, and `[DONE]` is not sent:
+
+```
+data: {"error":{"message":"OpenRouter stream error: ...","type":"api_error","param":null,"code":502}}
+```
+
+The OpenAI SDKs raise this as an `APIError`, so half an answer is never mistaken for
+a whole one.
+
+**How each backend streams:**
+
+| backend | how |
+|---|---|
+| OpenRouter (every paid tier, specific models, the free lane's OpenRouter rung) | native, token by token, with the billed cost on the final chunk |
+| Groq, Mistral, OpenAI, HuggingFace | native (OpenAI wire format) |
+| Gemini | native (`streamGenerateContent?alt=sse`) |
+| Cohere | native (v1 chat event stream) |
+| Local Claude Code | native, via the bridge (`--output-format stream-json`) |
+
+A backend that cannot stream would be replayed as a single chunk rather than refused,
+so a caller never gets an error just because a lane happened to pick it.
+
+**Details worth knowing:**
+
+- **Timeouts are between tokens, not overall.** `COMPLETION_TIMEOUT_SECONDS` bounds the
+  wait for the first token and each gap after it, so a long answer that keeps arriving
+  is never cut off at a fixed total.
+- **Reasoning is not forwarded.** Reasoning models stream their thinking first; it
+  keeps the connection alive but is not sent, matching the non-streaming reply.
+- **`max_tokens` on local Claude** is enforced as text arrives, at about four
+  characters a token, ending with `finish_reason: "length"`. Elsewhere the upstream
+  enforces it.
+- **`paid:moderate` spillover** onto local Claude gets
+  `LOCAL_CLAUDE_SPILLOVER_TIMEOUT_SECONDS` to produce its first token rather than to
+  finish, since a streaming caller is served as soon as text starts.
+- **If the caller disconnects**, the upstream call is cancelled so it stops generating.
+  The request is still logged, with the text produced so far, as successful with the
+  note `caller disconnected before the reply finished`.
+
+**Logging.** Streamed requests set `usage_logs.streamed = true` and record
+`time_to_first_token_ms` — the latency a streaming caller actually feels — alongside
+`response_time_ms`, the time to the last token. Cost is recorded exactly as for any
+other request; OpenRouter reports the billed amount on a stream's last chunk. A stream
+cut short never receives that chunk, so its tokens are estimated from the text and
+its cost is marked `estimated` rather than logged as zero.
+
+### Using the OpenAI SDKs
+
+Freeway is a drop-in base URL for the official SDKs and the frameworks built on them.
+Use a **project key** as the API key, and the gateway's model names as `model`.
+
+**Python**
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="https://freeway.pranta.dev/v1", api_key="fw_your_project_key")
+
+# One reply
+reply = client.chat.completions.create(
+    model="paid:moderate",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(reply.choices[0].message.content)
+
+# Streaming
+stream = client.chat.completions.create(
+    model="free",
+    messages=[{"role": "user", "content": "Tell me a short story."}],
+    stream=True,
+    stream_options={"include_usage": True},
+)
+for chunk in stream:
+    if chunk.choices and chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
+    if chunk.usage:
+        print(f"\n[{chunk.usage.total_tokens} tokens]")
+```
+
+**Node / TypeScript**
+
+```ts
+import OpenAI from "openai";
+
+const client = new OpenAI({ baseURL: "https://freeway.pranta.dev/v1", apiKey: process.env.FREEWAY_PROJECT_KEY });
+
+const stream = await client.chat.completions.create({
+  model: "paid:premium",
+  messages: [{ role: "user", content: "Explain SSE in one paragraph." }],
+  stream: true,
+});
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content ?? "");
+}
+```
+
+**.NET (raw `HttpClient`)**
+
+```csharp
+using var request = new HttpRequestMessage(HttpMethod.Post, "https://freeway.pranta.dev/v1/chat/completions")
+{
+    Content = JsonContent.Create(new { model = "free", stream = true, messages = new[] { new { role = "user", content = "Hi" } } })
+};
+request.Headers.Add("X-Api-Key", freewayKey);
+
+// ResponseHeadersRead, or HttpClient buffers the whole stream before returning.
+using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+response.EnsureSuccessStatusCode();
+using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+while (await reader.ReadLineAsync() is { } line)
+{
+    if (!line.StartsWith("data: ")) continue;
+    var data = line["data: ".Length..];
+    if (data == "[DONE]") break;
+    using var chunk = JsonDocument.Parse(data);
+    if (chunk.RootElement.TryGetProperty("error", out var error)) throw new Exception(error.GetProperty("message").GetString());
+    var choices = chunk.RootElement.GetProperty("choices");
+    if (choices.GetArrayLength() > 0 && choices[0].GetProperty("delta").TryGetProperty("content", out var text))
+        Console.Write(text.GetString());
+}
+```
+
+**What is supported**
+
+| | |
+|---|---|
+| `base_url` | `https://<host>/v1` (the gateway root works too) |
+| API key | A project key, sent by the SDK as `Authorization: Bearer` |
+| `client.chat.completions.create(...)` | Yes, with and without `stream=True` |
+| `client.chat.completions.stream(...)` (Node helper) | Yes |
+| `client.models.list()` | Yes — the gateway's lane names first, then every provider model |
+| Content as an array of text parts | Yes, joined into one message |
+| `developer` role | Yes, treated as `system` |
+| `max_completion_tokens`, `stream_options.include_usage` | Yes |
+| `n > 1` | No — `400` |
+| Image, audio or file content parts | No — `400`, naming the part type |
+| `tools` / function calling, `response_format`, `logprobs` | Not forwarded; ignored |
+
 ### Model Endpoints (Admin or Project Key)
 
 ```bash
@@ -206,6 +408,8 @@ GET /models/free             # All free models (ranked by context)
 GET /models/paid             # All paid models (ranked by price)
 GET /models/paid/{tier}      # Models in one tier, in fallback-chain order
 GET /models/image            # All image generation models (ranked by price)
+GET /v1/models               # OpenAI-shaped model list: lane names first, then every provider model
+GET /v1/providers            # Providers and whether each is configured
 GET /health                  # Service health check
 ```
 
@@ -329,7 +533,7 @@ Environment variables (see `.env.example`):
 | `OPENROUTER_ALLOW_FALLBACKS` | No | Let OpenRouter route around a failed/throttled provider to another serving the same model (default: true) |
 | `OPENROUTER_IGNORE_PROVIDERS` | No | Comma-separated provider slugs to exclude, e.g. `novita,deepinfra` (default: none) |
 | `REQUEST_TIMEOUT_SECONDS` | No | Timeout for provider list/model fetches (default: 30) |
-| `COMPLETION_TIMEOUT_SECONDS` | No | Timeout for chat completion calls (default: 120) |
+| `COMPLETION_TIMEOUT_SECONDS` | No | Timeout for chat completion calls (default: 120). For a stream it bounds the wait for each token instead of the whole reply |
 | `DB_HOST` | No | Database host (default: localhost) |
 | `DB_PORT` | No | Database port (default: 5432) |
 | `DB_USER` | No | Database user (default: postgres) |
@@ -363,7 +567,7 @@ Environment variables (see `.env.example`):
 | `CREDENTIAL_ALERTS_ENABLED` | No | Alert when any provider rejects its API key (default: true) |
 | `FREE_LANE_OPENROUTER_COUNT` | No | Zero-cost OpenRouter models the free lane may try (default: 3, 0 disables) |
 | `LOCAL_CLAUDE_ENABLED` | No | Serve `paid:premium` and `paid:moderate` from a local Claude Code subscription (default: false) |
-| `LOCAL_CLAUDE_SPILLOVER_TIMEOUT_SECONDS` | No | How long `paid:moderate` waits before using a paid model instead (default: 5) |
+| `LOCAL_CLAUDE_SPILLOVER_TIMEOUT_SECONDS` | No | How long `paid:moderate` waits before using a paid model instead (default: 5). For a stream, the wait for the first token |
 | `BRIDGE_HOURLY_TOKEN_BUDGET` | No | Tokens the bridge may spend per rolling hour. Set, not discovered: the CLI reports no limit (default: 500000) |
 | `BRIDGE_SPILLOVER_SHARE` | No | Share of that budget `paid:moderate` may use; the rest is premium's reserve (default: 0.6) |
 | `CLAUDE_HOME` | No | Home directory holding `.claude` and `.claude.json` to mount (default: `/home/ubuntu`) |
@@ -572,6 +776,16 @@ curl -X POST http://localhost:8080/chat/completions \
     "model": "free",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
+
+# 3. The same, streamed (-N stops curl buffering the events)
+curl -N -X POST http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer fw_your-project-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "free",
+    "stream": true,
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
 ```
 
 ### Using JWT Authentication (Web Panel)
@@ -595,6 +809,226 @@ curl http://localhost:8080/admin/projects \
 curl "http://localhost:8080/admin/analytics/usage?project_id=YOUR_PROJECT_ID" \
   -H "X-Api-Key: your-admin-key"
 ```
+
+---
+
+## Using Freeway with AI Agents
+
+Ready-to-use prompts for an AI assistant (ChatGPT, Claude, etc.) to wire an app up to
+your Freeway instance, or to work with it directly.
+
+**Before using these prompts, gather this information:**
+- `YOUR_FREEWAY_URL` - Your Freeway API URL (e.g., `https://freeway.pranta.dev`)
+- `YOUR_PROJECT_API_KEY` - A project's key (`fw_...`), shown once when the project is created or its key rotated
+- `YOUR_ADMIN_API_KEY` - The gateway's `ADMIN_API_KEY`, only for the admin prompts
+
+---
+
+### Getting Started Prompt
+
+```
+I have a Freeway instance at [YOUR_FREEWAY_URL]. Freeway is an OpenAI-compatible AI
+gateway: it routes chat completions across several providers with automatic
+fallback, and tracks usage and cost per project.
+
+Authentication:
+- Admin endpoints: header X-Api-Key: [YOUR_ADMIN_API_KEY]
+- Chat endpoints: a project key, as X-Api-Key: <key> or Authorization: Bearer <key>
+
+Help me get started by:
+1. Creating a project named "[YOUR_PROJECT_NAME]" via
+   POST /admin/projects  body {"name": "...", "rate_limit_per_minute": 60}
+   The response contains "api_key" - it is shown only once, so tell me to save it.
+2. Sending a test chat completion with that key:
+   POST /v1/chat/completions  body {"model": "free", "messages": [{"role": "user", "content": "Hello"}]}
+3. Sending the same request with "stream": true and showing me the events.
+
+Please give me curl commands for each step.
+```
+
+---
+
+### Chat Integration Prompt
+
+```
+I want my app to call Freeway, an OpenAI-compatible AI gateway at [YOUR_FREEWAY_URL].
+My project key is: [YOUR_PROJECT_API_KEY]  (keep it server-side, never in a browser or mobile app)
+
+ENDPOINT
+- POST [YOUR_FREEWAY_URL]/v1/chat/completions  (also served at /chat/completions)
+- Headers: Authorization: Bearer <project key>   (or X-Api-Key: <project key>)
+- Body is the OpenAI chat completions shape: model, messages, temperature,
+  max_tokens (or max_completion_tokens), top_p, stop, stream, stream_options
+
+MODEL VALUES (the gateway picks the actual model and falls back on failure)
+- "free"          free providers only; never costs money; 503 if none can answer
+- "paid:low"      cheapest paid models
+- "paid:moderate" balanced cost and capability
+- "paid:premium"  most capable models
+- "<model id>"    a specific model, e.g. "openai/gpt-4.1-mini", single attempt
+
+FREEWAY EXTRAS (optional)
+- "reasoning": {"effort": "low"}  cuts cost on reasoning models a lot
+- "use_local_only": true          serve from the local Claude subscription or fail (503), never pay
+
+ERRORS
+- JSON body {"detail": "...", "error": {"message": "...", "type": "...", "code": <status>}}
+- 400 bad request, 401 bad key, 502 every upstream failed, 503 lane unavailable
+
+My app is written in [LANGUAGE / FRAMEWORK]. Please write a small client for it with
+a function that sends a list of messages and returns the reply text, with sensible
+timeouts and error handling. If an official OpenAI SDK exists for my language, use
+it with base_url = [YOUR_FREEWAY_URL]/v1 instead of raw HTTP.
+```
+
+---
+
+### Streaming Integration Prompt
+
+```
+I want to stream replies token by token from Freeway, an OpenAI-compatible AI gateway
+at [YOUR_FREEWAY_URL], into my app. My project key is: [YOUR_PROJECT_API_KEY]
+
+REQUEST
+POST [YOUR_FREEWAY_URL]/v1/chat/completions
+Headers: Authorization: Bearer <project key>, Content-Type: application/json
+Body: {"model": "[MODEL, e.g. free or paid:moderate]", "stream": true,
+       "stream_options": {"include_usage": true}, "messages": [...]}
+
+RESPONSE: server-sent events (text/event-stream), exactly OpenAI's format
+- Each event is a line "data: <json>" followed by a blank line
+- <json> is a chat.completion.chunk: append choices[0].delta.content when present
+- The first chunk has delta {"role": "assistant", "content": ""}
+- The last content chunk has choices[0].finish_reason ("stop", or "length" if max_tokens was hit)
+- With include_usage, one more chunk follows with "choices": [] and "usage": {...}
+- "data: [DONE]" ends a COMPLETE reply
+
+ERRORS
+- Before streaming starts: a normal JSON error response with a 4xx/5xx status
+  (the gateway retries and falls back across providers before giving up)
+- After streaming starts: a final event data: {"error": {"message": "..."}} and NO [DONE].
+  Treat the reply as incomplete and show the error.
+
+IMPLEMENTATION NOTES
+- Don't let the HTTP client buffer the response (e.g. .NET HttpCompletionOption.ResponseHeadersRead,
+  fetch() with response.body.getReader(), Python httpx/requests with stream=True)
+- Don't put an overall timeout on the whole stream; long answers keep arriving
+- Cancel the request when the user navigates away; the gateway stops the upstream call too
+- Never call the gateway from a browser or mobile app with the project key; stream through
+  my own backend and relay the text to the client (SSE or WebSocket)
+
+My stack is [BACKEND LANGUAGE] with [FRONTEND / UI]. Please implement streaming end to end:
+the backend call, relaying it to the UI, and rendering text as it arrives. If an official
+OpenAI SDK exists for my backend language, use it with base_url = [YOUR_FREEWAY_URL]/v1.
+```
+
+---
+
+### OpenAI SDK Migration Prompt
+
+```
+My app currently calls the OpenAI API with the official SDK. I want it to go through
+Freeway, an OpenAI-compatible gateway at [YOUR_FREEWAY_URL], instead.
+
+What changes:
+- base_url / baseURL: [YOUR_FREEWAY_URL]/v1
+- api_key / apiKey: my Freeway project key [YOUR_PROJECT_API_KEY] (read it from an env var)
+- model: one of "free", "paid:low", "paid:moderate", "paid:premium", or a provider model id
+  such as "openai/gpt-4.1-mini" (client.models.list() shows them all, lane names first)
+
+What keeps working unchanged: chat.completions.create with and without stream=True,
+stream_options.include_usage, the Node .stream() helper, models.list(), message content
+given as an array of text parts, the "developer" role, max_completion_tokens, and the
+SDK's error classes (BadRequestError, AuthenticationError, APIError mid-stream).
+
+Not supported: n > 1 (400), image/audio/file content parts (400), and tools/function
+calling, response_format and logprobs (ignored, not forwarded).
+
+Please find every place my code constructs the OpenAI client or names a model, switch
+it to Freeway, and flag any call that relies on something in the unsupported list.
+```
+
+---
+
+### Admin & Analytics Prompt
+
+```
+I administer a Freeway AI gateway at [YOUR_FREEWAY_URL].
+Admin key: [YOUR_ADMIN_API_KEY]  (send as header X-Api-Key)
+
+PROJECTS
+- GET    /admin/projects                    list projects
+- POST   /admin/projects                    create {"name", "rate_limit_per_minute", "metadata"}; returns api_key once
+- PATCH  /admin/projects/{id}               update
+- DELETE /admin/projects/{id}               delete
+- POST   /admin/projects/{id}/rotate-key    new key, old one stops working immediately
+
+MODELS
+- GET /models/paid/{low|moderate|premium}   a tier's fallback chain
+- PUT /admin/model/paid/{tier}  {"model_id": "..."}   pin a tier's head model
+- GET /v1/models                            everything callable
+
+ANALYTICS
+- GET /admin/analytics/summary
+- GET /admin/analytics/usage?project_id={id}
+- GET /admin/analytics/logs?project_id={id}
+  Each log row has model_id, model_type, model_tier, input/output tokens, cost_usd,
+  success, error_message, finish_reason, streamed, time_to_first_token_ms and
+  response_time_ms.
+
+LOCAL CLAUDE
+- GET  /admin/local-claude          can premium use the local subscription right now, and why not
+- POST /admin/local-claude/check    probe it now
+
+I want to: [YOUR SPECIFIC REQUEST - e.g. "see which project spent the most this week and how much of it streamed"]
+
+Please give me the exact curl commands.
+```
+
+---
+
+### Complete Integration Prompt
+
+```
+I'm integrating with Freeway, an OpenAI-compatible AI gateway at [YOUR_FREEWAY_URL].
+
+AUTHENTICATION
+- Chat and model endpoints: project key, as Authorization: Bearer <key> or X-Api-Key: <key>
+- Admin endpoints: admin key as X-Api-Key, or a JWT from POST /auth/login as Bearer
+
+MY CREDENTIALS
+- Project key: [YOUR_PROJECT_API_KEY]
+- Admin key: [YOUR_ADMIN_API_KEY] (only if I need admin endpoints)
+
+CHAT
+- POST /v1/chat/completions (alias /chat/completions), OpenAI request and response shape
+- model: "free" | "paid:low" | "paid:moderate" | "paid:premium" | "<provider model id>"
+- Extras: reasoning {"effort": "low"|"medium"|"high"}, use_local_only true|false
+- n must be 1; content parts must be text
+
+STREAMING
+- "stream": true -> text/event-stream of chat.completion.chunk events, "data: [DONE]" at the end
+- "stream_options": {"include_usage": true} -> final chunk with usage and empty choices
+- Errors before the first token are normal JSON errors with a status code
+- Errors after it arrive as data: {"error": {...}} with no [DONE]
+
+MODELS
+- GET /v1/models (OpenAI list format), GET /models/free, /models/paid/{tier}, /models/image
+
+ERRORS
+- {"detail": "...", "error": {"message", "type", "param", "code"}}
+- 400 invalid request, 401 bad key, 502 all upstreams failed, 503 lane unavailable
+
+OFFICIAL SDKS
+- Python/Node OpenAI SDKs work with base_url [YOUR_FREEWAY_URL]/v1 and the project key as api_key
+
+I need help with:
+[YOUR SPECIFIC REQUEST]
+
+Please provide working code or curl commands with my details filled in.
+```
+
+---
 
 ## Local Claude Code for the premium lane
 
@@ -627,6 +1061,12 @@ capacity that would otherwise sit idle and is refused the instant that is in
 question, which keeps it from ever turning into latency.
 
 `free`, `paid:low` and `image` are untouched.
+
+Streaming requests use it too. The bridge runs Claude Code with
+`--output-format stream-json`, which changes only how the answer is printed, not the
+prompt, so the cached prefix and the cost per request are the same as for a single
+reply. Text is relayed as Claude Code writes it; for `paid:moderate` the spillover
+deadline covers the first token rather than the whole answer.
 
 ### Demanding it: `use_local_only`
 
@@ -834,7 +1274,9 @@ To customize domains, edit the Traefik labels in `compose.yml`.
 5. **Request flow**:
    - Authentication validated (API key or JWT)
    - Model resolved (free/paid/image/specific)
-   - Request proxied to appropriate provider
+   - Request proxied to appropriate provider, falling back on failure
+   - For `"stream": true`, the same routing runs until a backend produces its first
+     token; from then on the reply is relayed to the caller as server-sent events
    - Usage logged to database, with the cost the provider actually billed
 
 ## Cost Accounting
@@ -854,7 +1296,9 @@ Every request records what it cost and **where that figure came from**, in
 
 OpenRouter requests carry `{"usage":{"include":true}}`, so the response returns
 `usage.cost` — the real charge — along with the endpoint that served it
-(recorded as `upstream_provider`).
+(recorded as `upstream_provider`). Streams get the same figure, on their final chunk.
+A stream that ends before that chunk — usually the caller hanging up — has its tokens
+estimated from the text and its cost marked `estimated`, rather than logged as zero.
 
 This matters because of provider routing: with `OPENROUTER_PROVIDER_SORT=throughput`,
 the endpoint serving a request may not charge the model's headline rate. A measured

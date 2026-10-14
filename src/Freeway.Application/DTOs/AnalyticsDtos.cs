@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using Freeway.Application.Common;
+
 namespace Freeway.Application.DTOs;
 
 public class GlobalSummaryDto
@@ -91,11 +94,23 @@ public class UsageLogDto
     public string? ReasoningEffort { get; set; }
 
     public int? RequestedMaxTokens { get; set; }
+
+    /// <summary>The caller asked for a stream.</summary>
+    public bool Streamed { get; set; }
+
+    /// <summary>For a stream, the wait before its first token. Null otherwise.</summary>
+    public int? TimeToFirstTokenMs { get; set; }
 }
 
 public class ChatMessageDto
 {
     public string Role { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Accepts either a string or an array of content parts, as OpenAI clients send
+    /// both; text parts are joined. Always written back as a string.
+    /// </summary>
+    [JsonConverter(typeof(MessageContentJsonConverter))]
     public string Content { get; set; } = string.Empty;
 }
 

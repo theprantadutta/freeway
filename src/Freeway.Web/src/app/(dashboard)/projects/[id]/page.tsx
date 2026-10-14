@@ -376,13 +376,21 @@ function LogRow({ log }: { log: UsageLog }) {
             <Detail label="Input tokens" value={count(log.input_tokens)} />
             <Detail label="Output tokens" value={count(log.output_tokens)} />
             <Detail label="Model" value={log.model_id} mono />
+            <Detail label="First token" value={log.streamed ? ms(log.time_to_first_token_ms) : "Not streamed"} />
           </dl>
 
-          {log.error_message && (
-            <div className="rounded border border-bad/30 bg-bad/[0.07] px-3.5 py-2.5">
-              <p className="text-sm text-bad">{log.error_message}</p>
-            </div>
-          )}
+          {/* A successful request can still carry a note, such as a streaming caller
+              that hung up early. That is not a failure, so it is not shown as one. */}
+          {log.error_message &&
+            (log.success ? (
+              <div className="rounded border border-hair bg-raised px-3.5 py-2.5">
+                <p className="text-sm text-text-2">{log.error_message}</p>
+              </div>
+            ) : (
+              <div className="rounded border border-bad/30 bg-bad/[0.07] px-3.5 py-2.5">
+                <p className="text-sm text-bad">{log.error_message}</p>
+              </div>
+            ))}
 
           {log.response_content && (
             <div>

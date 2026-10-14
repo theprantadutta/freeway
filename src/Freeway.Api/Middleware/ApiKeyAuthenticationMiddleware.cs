@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Freeway.Api.Common;
 using Freeway.Domain.Interfaces;
 using Microsoft.Extensions.Hosting;
 
@@ -57,8 +58,11 @@ public class ApiKeyAuthenticationMiddleware
             return;
         }
 
+        var apiKey = context.Request.Headers["X-Api-Key"].FirstOrDefault();
+
         // Try JWT Bearer token first
         var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
+        var bearerKey = false;
         if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
             var token = authHeader.Substring("Bearer ".Length).Trim();
@@ -88,18 +92,21 @@ public class ApiKeyAuthenticationMiddleware
                 }
             }
 
-            context.Response.StatusCode = 401;
-            await context.Response.WriteAsJsonAsync(new { detail = "Invalid or expired token" });
-            return;
+            // Not a login token, so it may be a key. Every OpenAI SDK sends its API key
+            // as "Authorization: Bearer <key>" and has no notion of X-Api-Key, so this
+            // is what lets one talk to the gateway with nothing but a base URL changed.
+            // An explicit X-Api-Key still wins when both are sent.
+            if (string.IsNullOrEmpty(apiKey))
+            {
+                apiKey = token;
+                bearerKey = true;
+            }
         }
 
         // Try API key
-        var apiKey = context.Request.Headers["X-Api-Key"].FirstOrDefault();
-
         if (string.IsNullOrEmpty(apiKey))
         {
-            context.Response.StatusCode = 401;
-            await context.Response.WriteAsJsonAsync(new { detail = "Authentication required. Provide X-Api-Key header or Bearer token." });
+            await RejectAsync(context, "Authentication required. Provide X-Api-Key header or Bearer token.");
             return;
         }
 
@@ -135,8 +142,13 @@ public class ApiKeyAuthenticationMiddleware
             return;
         }
 
-        context.Response.StatusCode = 401;
-        await context.Response.WriteAsJsonAsync(new { detail = "Invalid API key" });
+        await RejectAsync(context, bearerKey ? "Invalid or expired token, or invalid API key" : "Invalid API key");
+    }
+
+    private static async Task RejectAsync(HttpContext context, string message)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(ApiError.Body(StatusCodes.Status401Unauthorized, message));
     }
 }
 

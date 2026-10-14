@@ -47,31 +47,12 @@ public class OpenRouterProvider : BaseAiProvider, IModelFetcher
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(CompletionTimeout));
 
-            // If no model specified, get the selected paid model from cache
-            var model = modelId;
-            if (string.IsNullOrEmpty(model))
-            {
-                var selectedPaidModel = _modelCacheService.GetSelectedPaidModel();
-                model = selectedPaidModel?.Id ?? "openai/gpt-4o-mini"; // Default to GPT-4o-mini if not configured
-            }
-
-            var request = new OpenRouterChatRequest
-            {
-                Model = model,
-                Messages = messages.Select(m => new OpenRouterMessage { Role = m.Role, Content = m.Content }).ToList(),
-                Temperature = options?.Temperature,
-                MaxTokens = options?.MaxTokens,
-                TopP = options?.TopP,
-                FrequencyPenalty = options?.FrequencyPenalty,
-                PresencePenalty = options?.PresencePenalty,
-                Stop = options?.Stop,
-                Stream = false
-            };
+            var model = ResolveModel(modelId);
+            var request = BuildRequest(model, messages, options);
 
             using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "https://openrouter.ai/api/v1/chat/completions");
             httpRequest.Headers.Add("Authorization", $"Bearer {_apiKey}");
-            httpRequest.Headers.Add("HTTP-Referer", "https://freeway.pranta.dev");
-            httpRequest.Headers.Add("X-Title", "Freeway");
+            AddAttribution(httpRequest);
             httpRequest.Content = JsonContent.Create(request, options: JsonOptions);
 
             var response = await HttpClient.SendAsync(httpRequest, cts.Token);
@@ -127,6 +108,55 @@ public class OpenRouterProvider : BaseAiProvider, IModelFetcher
             Logger.LogError(ex, "OpenRouter API request failed");
             return CreateErrorResult(ex.Message, (int)stopwatch.ElapsedMilliseconds);
         }
+    }
+
+    public override Task<ChatCompletionStream> StreamChatCompletionAsync(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var model = ResolveModel(modelId);
+
+        // OpenRouter always ends a stream with a usage chunk, so nothing extra is asked for.
+        return StreamOpenAiCompatibleAsync(
+            "https://openrouter.ai/api/v1/chat/completions",
+            model,
+            BuildRequest(model, messages, options),
+            "OpenRouter",
+            requestUsage: false,
+            cancellationToken,
+            AddAttribution);
+    }
+
+    /// <summary>The requested model, or the selected paid model when none was named.</summary>
+    private string ResolveModel(string modelId)
+    {
+        if (!string.IsNullOrEmpty(modelId))
+        {
+            return modelId;
+        }
+
+        var selectedPaidModel = _modelCacheService.GetSelectedPaidModel();
+        return selectedPaidModel?.Id ?? "openai/gpt-4o-mini"; // Default to GPT-4o-mini if not configured
+    }
+
+    private static OpenRouterChatRequest BuildRequest(string model, List<ChatMessage> messages, ChatCompletionOptions? options) => new()
+    {
+        Model = model,
+        Messages = messages.Select(m => new OpenRouterMessage { Role = m.Role, Content = m.Content }).ToList(),
+        Temperature = options?.Temperature,
+        MaxTokens = options?.MaxTokens,
+        TopP = options?.TopP,
+        FrequencyPenalty = options?.FrequencyPenalty,
+        PresencePenalty = options?.PresencePenalty,
+        Stop = options?.Stop
+    };
+
+    private static void AddAttribution(HttpRequestMessage request)
+    {
+        request.Headers.Add("HTTP-Referer", "https://freeway.pranta.dev");
+        request.Headers.Add("X-Title", "Freeway");
     }
 
     public async Task<ProviderModelListResult> FetchModelsAsync(CancellationToken cancellationToken = default)

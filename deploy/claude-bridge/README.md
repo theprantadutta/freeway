@@ -103,10 +103,10 @@ which is only acceptable when being wrong is cheap.
 For the same reason the bridge now stops the CLI when the caller disconnects.
 
 Refusals are instantaneous and happen before the queue, so spillover can never turn
-into latency. They come back with `reasonCode` of `busy` or `budget`, which the
-caller treats as the bridge working rather than failing -- a refused spillover must
-not mark the bridge unhealthy, or cheap traffic would lock premium out of the
-subscription entirely.
+into latency. They come back with `reasonCode` of `busy`, `budget` or `too_slow`,
+which the caller treats as the bridge working rather than failing -- a refused
+spillover must not mark the bridge unhealthy, or cheap traffic would lock premium out
+of the subscription entirely.
 
 ### The budget is set, not discovered
 
@@ -114,6 +114,11 @@ subscription entirely.
 configured, because the ceiling cannot be read: the CLI reports what a call used but
 carries no rate, limit, remaining or reset field anywhere in its output. There is
 nothing to query.
+
+One qualification, found while adding streaming: with `--output-format stream-json`
+the CLI does emit a `rate_limit_event` carrying the plan's `utilization`, window and
+`resetsAt`. Nothing reads it yet. It is the obvious source if the budget is ever to be
+discovered rather than configured.
 
 At roughly 9.4k tokens a call, the 500,000 default is about 53 calls an hour, of
 which moderate may have 12. Probes count against it too -- they are real calls on
@@ -214,11 +219,34 @@ curl -s -H "Authorization: Bearer $BRIDGE_TOKEN" http://172.17.0.1:8787/health
 | method | path | returns |
 |---|---|---|
 | `GET` | `/health` | `{ ok, state, detail, latencyMs, model, checkedAt, cached }` |
-| `POST` | `/complete` | `{ ok, text, model, listCostUsd, promptTokens, completionTokens, durationMs }` |
+| `POST` | `/complete` | `{ ok, text, model, listCostUsd, promptTokens, completionTokens, stopReason, durationMs }`, or NDJSON lines with `"stream": true` |
 
 `/complete` takes an optional `priority` of `premium` (the default, so a caller that
 sends nothing keeps the old behaviour) or `spillover`, and an optional `deadlineMs`
 the bridge uses to refuse work it cannot finish in time.
+
+### Streaming
+
+With `"stream": true`, `/complete` answers in newline-delimited JSON
+(`application/x-ndjson`) instead of one body, so the gateway can relay the answer as
+Claude Code writes it:
+
+```
+{"type":"delta","text":"one, two, three, four,"}
+{"type":"delta","text":" five, six"}
+{"type":"done","ok":true,"text":"one, two, three, four, five, six","model":"...","listCostUsd":0.028,"promptTokens":9724,"completionTokens":45,"stopReason":"end_turn","durationMs":5037}
+```
+
+The last line is always `done` or `error`, carrying exactly the fields the
+non-streaming reply would; a refusal is a single `error` line with its `reasonCode`.
+Headers are sent once the call has its slot, so a queued premium caller waits on the
+connection rather than on a stream that has started and says nothing.
+
+The CLI runs with `--output-format stream-json --verbose --include-partial-messages`
+instead of `--output-format json`. That changes only how the answer is printed, not
+the prompt, so the cached prefix and the cost per call are unchanged. The final
+`result` line it prints is the same envelope `json` mode prints, and is read the same
+way. Thinking deltas are dropped, as they are from the final result.
 
 It does not honour `max_tokens`, and deliberately so. The obvious mechanism,
 `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, does not truncate -- it fails the entire call with

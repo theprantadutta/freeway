@@ -213,11 +213,18 @@ const SYSTEM_PROMPT =
  *
  * `--exclude-dynamic-system-prompt-sections` is deliberately absent: the CLI ignores
  * it whenever --system-prompt is given, which is always, here.
+ *
+ * Streaming swaps only the output format. stream-json (which the CLI will only emit
+ * with --verbose) prints one event per line, and --include-partial-messages adds the
+ * text as it is generated rather than once per finished message. Neither touches the
+ * prompt, so the cached prefix -- and so the cost above -- is the same either way.
  */
-function buildArgs(systemPrompt) {
+function buildArgs(systemPrompt, stream = false) {
   return [
     "-p",
-    "--output-format", "json",
+    ...(stream
+      ? ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+      : ["--output-format", "json"]),
     "--max-turns", "1",
     "--system-prompt", systemPrompt,
     "--strict-mcp-config",
@@ -278,12 +285,35 @@ ${stderr}`;
   return `exit ${code}: ${text.slice(0, 300) || "no output"}`;
 }
 
-function runClaude(prompt, systemPrompt, { onChild } = {}) {
+/**
+ * Picks the answer's text out of one stream-json line, or null for any other event.
+ * Thinking arrives as thinking_delta and is left out, as it is from the final result.
+ */
+function textDelta(line) {
+  let event;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const delta = event.type === "stream_event" && event.event?.type === "content_block_delta"
+    ? event.event.delta
+    : null;
+  return delta?.type === "text_delta" && delta.text ? delta.text : null;
+}
+
+/**
+ * Runs one call. With onDelta it streams: the answer's text is passed on as it is
+ * generated, and the final result -- the same envelope --output-format json prints --
+ * arrives as the last line, so everything after that is handled identically.
+ */
+function runClaude(prompt, systemPrompt, { onChild, onDelta } = {}) {
   return new Promise((resolve) => {
     const started = Date.now();
+    const streaming = typeof onDelta === "function";
     let child;
     try {
-      child = spawn(CLAUDE_BIN, buildArgs(systemPrompt), {
+      child = spawn(CLAUDE_BIN, buildArgs(systemPrompt, streaming), {
         cwd: WORKDIR,
 
         // CLAUDE_CODE_MAX_OUTPUT_TOKENS is deliberately NOT set here, though it is
@@ -309,6 +339,21 @@ function runClaude(prompt, systemPrompt, { onChild } = {}) {
     let stderr = "";
     let settled = false;
 
+    // In stream mode stdout is one JSON event per line. Lines are handled as they
+    // complete; the result envelope is kept, since it is the line every outcome --
+    // success or failure -- is read from.
+    let pending = "";
+    let resultLine = null;
+    const onLine = (line) => {
+      if (!line.trim()) return;
+      if (line.includes('"type":"result"')) {
+        resultLine = line;
+        return;
+      }
+      const text = textDelta(line);
+      if (text) onDelta(text);
+    };
+
     const done = (value) => {
       if (settled) return;
       settled = true;
@@ -321,24 +366,37 @@ function runClaude(prompt, systemPrompt, { onChild } = {}) {
       done({ ok: false, reason: `timed out after ${TIMEOUT_MS}ms` });
     }, TIMEOUT_MS);
 
-    child.stdout.on("data", (d) => (stdout += d));
+    child.stdout.on("data", (d) => {
+      stdout += d;
+      if (!streaming) return;
+      pending += d;
+      let newline;
+      while ((newline = pending.indexOf("\n")) >= 0) {
+        onLine(pending.slice(0, newline));
+        pending = pending.slice(newline + 1);
+      }
+    });
     child.stderr.on("data", (d) => (stderr += d));
     child.on("error", (err) => done({ ok: false, reason: `spawn failed: ${err.message}` }));
 
     child.on("close", (code) => {
       const durationMs = Date.now() - started;
+      if (streaming && pending) onLine(pending);
+
+      // The envelope to read: all of stdout for json, the result line for stream-json.
+      const output = streaming ? resultLine ?? stdout : stdout;
 
       if (code !== 0) {
-        return done({ ok: false, reason: explain(code, stdout, stderr), durationMs });
+        return done({ ok: false, reason: explain(code, output, stderr), durationMs });
       }
 
       let parsed;
       try {
-        parsed = JSON.parse(stdout);
+        parsed = JSON.parse(output);
       } catch {
         return done({
           ok: false,
-          reason: `unparseable output: ${stdout.trim().slice(0, 200)}`,
+          reason: `unparseable output: ${output.trim().slice(0, 200)}`,
           durationMs,
         });
       }
@@ -527,17 +585,39 @@ const server = http.createServer(async (req, res) => {
     // current behaviour exactly.
     const priority = body.priority === "spillover" ? "spillover" : "premium";
 
+    // A streaming caller gets newline-delimited JSON instead of one body: a "delta"
+    // line per piece of text, then a single "done" or "error" line carrying exactly
+    // the fields the non-streaming reply would have had.
+    const stream = body.stream === true;
+    const line = (value) => {
+      if (!res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(value)}\n`);
+    };
+    const finish = (result) => {
+      if (stream) {
+        line({ type: result.ok ? "done" : "error", ...result });
+        return res.end();
+      }
+      return send(res, 200, result);
+    };
+
     // Checked before the queue, never inside it: a refused spillover call has to come
     // back immediately so the caller can use a paid model, rather than waiting.
     const verdict = admit(priority, Number(body.deadlineMs) || 0);
     if (!verdict.ok) {
       console.log(`${priority} refused: ${verdict.reason}`);
-      return send(res, 200, { ok: false, reason: verdict.reason, reasonCode: verdict.reasonCode });
+      if (stream) res.writeHead(200, { "content-type": "application/x-ndjson" });
+      return finish({ ok: false, reason: verdict.reason, reasonCode: verdict.reasonCode });
     }
 
     const { system, prompt } = render(messages);
 
     await acquire();
+
+    // Headers go out once the call has its slot, so a queued premium caller waits on
+    // the connection rather than on a stream that has started and says nothing.
+    if (stream) {
+      res.writeHead(200, { "content-type": "application/x-ndjson", "cache-control": "no-cache" });
+    }
     let child = null;
     let abandoned = false;
 
@@ -556,7 +636,10 @@ const server = http.createServer(async (req, res) => {
     res.on("close", onClose);
 
     try {
-      const result = await runClaude(prompt, system, { onChild: (c) => { child = c; } });
+      const result = await runClaude(prompt, system, {
+        onChild: (c) => { child = c; },
+        onDelta: stream ? (text) => line({ type: "delta", text }) : undefined,
+      });
 
       if (abandoned) return;
 
@@ -564,7 +647,7 @@ const server = http.createServer(async (req, res) => {
       // so the next request does not keep trying a route that just failed. An
       // abandoned call is not evidence of anything, so it is excluded above.
       if (!result.ok) cachedHealth = null;
-      return send(res, 200, result);
+      return finish(result);
     } finally {
       req.off("aborted", onClose);
       res.off("close", onClose);

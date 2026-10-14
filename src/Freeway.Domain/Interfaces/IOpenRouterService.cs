@@ -17,6 +17,16 @@ public interface IOpenRouterService
         List<ChatMessage> messages,
         ChatCompletionOptions? options = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Streams a completion. Opens only once the first delta has arrived, so a model
+    /// that fails before producing anything can still be swapped for the next one.
+    /// </summary>
+    Task<ChatCompletionStream> StreamChatCompletionAsync(
+        string modelId,
+        List<ChatMessage> messages,
+        ChatCompletionOptions? options = null,
+        CancellationToken cancellationToken = default);
 }
 
 public class OpenRouterModel
