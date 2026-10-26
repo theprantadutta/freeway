@@ -28,6 +28,7 @@ Freeway is a full-featured AI Gateway built with .NET 10 that:
 - **Daily Refresh**: Models updated via Hangfire background jobs
 - **Weekly Email Report**: Usage, cost and per-project breakdown emailed to the admin
 - **Spend Alerts**: Email when a project, model or the gateway overspends, or OpenRouter credit runs low
+- **Claude API credit** (optional): Spend the Claude plan's monthly API credit first on every paid lane (Opus 5.5 for premium, Sonnet 5.5 for moderate, Haiku 5.5 for low), counted to the cent and shown on its own dashboard page, then fall back to the Claude Code bridge and only then OpenRouter. Emails before the key expires
 - **Local Claude Code** (optional): Serve `paid:premium` from a host Claude Code subscription at no charge, with `paid:moderate` riding along on spare capacity, under a configurable hourly token budget. Falls back to a paid model whenever it is unavailable, or set `use_local_only` to fail instead
 - **PostgreSQL Storage**: Persistent storage for projects, users, and usage data
 - **Web Control Panel**: Next.js 16 dashboard with JWT authentication
@@ -494,6 +495,16 @@ The model must belong to the tier being set; a mismatch returns `400`.
 }
 ```
 
+#### Claude API credit
+
+```bash
+GET  /admin/credits                              # Used, left, burn rate, projection and what spent it this cycle
+POST /admin/credits/check                        # Check the key with a free call and recount
+PUT  /admin/credits/grants/{id}                  # Correct a cycle's amount or dates to match the Console
+PUT  /admin/credits/key                          # Set when the API key expires
+POST /admin/credits/key/test-reminder            # Send the key-expiry reminder now
+```
+
 #### Notifications
 
 ```bash
@@ -582,6 +593,23 @@ Environment variables (see `.env.example`):
 | `ALERT_OPENROUTER_KEY_EXPIRY_DAYS` | No | Warn this many days before key expiry (default: 14) |
 | `CREDENTIAL_ALERTS_ENABLED` | No | Alert when any provider rejects its API key (default: true) |
 | `FREE_LANE_OPENROUTER_COUNT` | No | Zero-cost OpenRouter models the free lane may try (default: 3, 0 disables) |
+| `ANTHROPIC_API_KEY` | No | Claude API key from a workspace with a spend limit. Setting it turns the credit on for the paid lanes |
+| `ANTHROPIC_CREDIT_ENABLED` | No | Turn the credit off without removing the key (default: true) |
+| `ANTHROPIC_CREDIT_MONTHLY_USD` | No | The monthly grant (default: 100) |
+| `ANTHROPIC_CREDIT_RENEWAL_DAY` | No | Day of the month the grant renews, the day of the Console's "Expires on" (default: 1) |
+| `ANTHROPIC_CREDIT_STOP_AT` | No | Stop using the credit at this share of the grant (default: 0.97) |
+| `ANTHROPIC_CREDIT_TIERS` | No | Lanes that use the credit (default: `premium,moderate,low`) |
+| `ANTHROPIC_PREMIUM_MODEL` / `_MODERATE_MODEL` / `_LOW_MODEL` | No | Model per lane (default: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`) |
+| `ANTHROPIC_PREMIUM_EFFORT` / `_MODERATE_EFFORT` / `_LOW_EFFORT` | No | Effort when the caller sends none (default: model default, `low`, `low`) |
+| `ANTHROPIC_PROMPT_CACHE` | No | Prompt caching (default: true) |
+| `ANTHROPIC_TIMEOUT_SECONDS` | No | Answer timeout; for a stream, between events (default: 120). Connecting is capped at 10s |
+| `ANTHROPIC_THINKING_HEADROOM_TOKENS` | No | Added to the caller's `max_tokens` for Claude's thinking (default: 4096) |
+| `ANTHROPIC_DEFAULT_MAX_TOKENS` | No | When the caller sends no `max_tokens` (default: 16000) |
+| `ANTHROPIC_OUTAGE_FAILURES` / `ANTHROPIC_OUTAGE_PAUSE_MINUTES` | No | Failures in a row before skipping the API, and for how long (default: 3, 5) |
+| `ANTHROPIC_KEY_LIFETIME_DAYS` | No | Expected key lifetime from first use, 0 for never (default: 30) |
+| `ANTHROPIC_KEY_WARN_DAYS` | No | Email this many days before the key expires (default: 3) |
+| `ANTHROPIC_KEY_REMINDERS_ENABLED` | No | Key expiry and rejection emails (default: true) |
+| `ANTHROPIC_CREDIT_REFRESH_CRON` | No | How often the credit is recounted from the logs (default: every 5 minutes) |
 | `LOCAL_CLAUDE_ENABLED` | No | Serve `paid:premium` and `paid:moderate` from a local Claude Code subscription (default: false) |
 | `LOCAL_CLAUDE_SPILLOVER_TIMEOUT_SECONDS` | No | How long `paid:moderate` waits before using a paid model instead (default: 5). For a stream, the wait for the first token |
 | `BRIDGE_HOURLY_TOKEN_BUDGET` | No | Tokens the bridge may spend per rolling hour. Set, not discovered: the CLI reports no limit (default: 500000) |
@@ -759,6 +787,12 @@ dark, so the same values are used in either mode.
 - Set rate limits and metadata
 - View project status (active/inactive)
 
+### Credits
+- The Claude API credit for the current cycle: left, used, the 97% stop mark, burn rate and projection
+- The order paid requests go in (credit, bridge, OpenRouter) and why the credit is paused, if it is
+- The API key: first seen, expiry (editable), days left, and a test-email button
+- Spend by project and by model, recent requests, and past cycles; the cycle's amount and dates are editable
+
 ### Project Details
 - Detailed usage statistics
 - Usage by model breakdown (pie chart)
@@ -883,6 +917,8 @@ MODEL VALUES (the gateway picks the actual model and falls back on failure)
 - "paid:low"      cheapest paid models
 - "paid:moderate" balanced cost and capability
 - "paid:premium"  most capable models
+  (all three are usually answered by Claude - Haiku, Sonnet, Opus - paid from the
+  gateway's Claude plan credit; "model" in the reply says which model answered)
 - "<model id>"    a specific model, e.g. "openai/gpt-4.1-mini", single attempt
 
 FREEWAY EXTRAS (optional)
@@ -1044,6 +1080,74 @@ I need help with:
 [YOUR SPECIFIC REQUEST]
 
 Please provide working code or curl commands with my details filled in.
+```
+
+---
+
+## Claude API credit (Max plan) for the paid lanes
+
+Claude Max and Team plans come with monthly Claude API credit ($100 on Max 5x, $200 on
+Max 20x). It expires at the end of each billing cycle, so Freeway spends it first. With
+`ANTHROPIC_API_KEY` set, every paid lane tries, in order:
+
+| Lane | 1. Claude API credit | 2. Claude Code bridge | 3. OpenRouter (billed) |
+|------|----------------------|-----------------------|------------------------|
+| `paid:premium` | `claude-opus-5-5` | premium priority | the premium chain |
+| `paid:moderate` | `claude-sonnet-5-5` | spare capacity only | the moderate chain |
+| `paid:low` (and bare `paid`) | `claude-haiku-5-5` | spare capacity only | the low chain |
+
+OpenRouter is only reached when both of the others could not answer. A request naming a
+specific model (`openai/gpt-5-mini`) still gets exactly that model, `free` and `image` are
+unchanged, and `use_local_only` still means the bridge and nothing else. The response
+shape does not change; only `model` says which Claude model answered.
+
+**Counting the credit.** Anthropic offers no way for an individual account to read its
+balance (the usage and cost Admin API needs an organisation admin key), so Freeway counts
+it itself: each response's token usage at list price, including cache reads and writes,
+is stored as `usage_logs.credit_cost_usd`. Those rows keep `cost_usd = 0` and
+`cost_source = "credit"`, so spend charts still show only money actually charged. A
+cycle is a row in `credit_grants`, opened automatically each month on
+`ANTHROPIC_CREDIT_RENEWAL_DAY` for `ANTHROPIC_CREDIT_MONTHLY_USD`, and editable on the
+dashboard to match the Console's Billing page. The count is re-read from the logs every
+five minutes.
+
+**When it stops.** The credit is skipped, and the request goes on to the bridge, when:
+
+- the count reaches `ANTHROPIC_CREDIT_STOP_AT` of the grant (default 97%);
+- Anthropic says the credit balance is too low (paused for an hour, then retried);
+- the key is rejected (paused 15 minutes, and you are emailed);
+- the API is down: three timeouts or 5xx errors in a row pause it for five minutes, so an
+  outage costs a handful of requests ten seconds each rather than every request a timeout;
+- it is rate limited or overloaded (paused a minute).
+
+The same Anthropic call also counts a refusal or an unsuitable request (a conversation
+ending in an assistant turn, which these models reject as prefill) as "try the next one".
+
+**The key.** A workspace key cannot read its own expiry, so Freeway records when it first
+sees each key (by SHA-256 fingerprint; the key itself is never stored) and expects it to
+last `ANTHROPIC_KEY_LIFETIME_DAYS`. It emails `ANTHROPIC_KEY_WARN_DAYS` before that, on the
+day, and straight away if Anthropic ever rejects the key. Rotating is just deploying the
+new key: an unseen fingerprint starts a new clock. The expiry can be set exactly on the
+Credits page.
+
+**Request shape.** System and `developer` messages become Anthropic's `system` field.
+Sampling parameters (`temperature`, `top_p`, penalties) are not sent, since current Claude
+models reject them. `reasoning.effort` maps to Claude's effort (`minimal` is taken as
+`low`); without it premium uses the model default and moderate and low use `low`. Because
+Claude's own `max_tokens` covers its thinking too, Freeway asks for the caller's
+`max_tokens` plus `ANTHROPIC_THINKING_HEADROOM_TOKENS` and cuts the answer to the caller's
+limit, with `finish_reason: "length"`. Prompt caching is on by default.
+
+**Setup.** In platform.claude.com make a workspace for Freeway, set its monthly spend limit
+to the grant as a hard cap, create a key in it, and set `ANTHROPIC_API_KEY` in `.env`.
+Leave the key empty and nothing changes.
+
+```bash
+GET  /admin/credits                     # The cycle: used, left, burn rate, projection, what spent it
+POST /admin/credits/check               # Check the key (free call), lift a pause, recount
+PUT  /admin/credits/grants/{id}         # {"amount_usd", "starts_at", "expires_at", "note"}
+PUT  /admin/credits/key                 # {"expires_at": "..."} or null for a key that never expires
+POST /admin/credits/key/test-reminder   # Email the expiry reminder now, to check mail works
 ```
 
 ---

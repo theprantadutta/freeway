@@ -257,6 +257,86 @@ public class AdminController : BaseApiController
 
     #endregion
 
+    #region Anthropic credit
+
+    /// <summary>
+    /// The Claude API credit for the current cycle: used, remaining, burn rate, and
+    /// what spent it. Recounts from the usage logs on every call.
+    /// </summary>
+    [HttpGet("credits")]
+    public async Task<ActionResult> GetCredits()
+    {
+        var result = await Mediator.Send(new Freeway.Application.Features.Credits.Queries.GetCreditOverviewQuery());
+        return HandleResult(result);
+    }
+
+    /// <summary>
+    /// Checks the key with a call that costs nothing, lifts a pause left by an earlier
+    /// rejection if the key now works, and recounts.
+    /// </summary>
+    [HttpPost("credits/check")]
+    public async Task<ActionResult> CheckCredits([FromServices] IAnthropicCreditService credit)
+    {
+        var status = await credit.CheckAsync();
+        return Ok(new
+        {
+            configured = credit.IsConfigured,
+            can_serve = status.CanServe,
+            state = status.State == AnthropicCreditState.NoGrant ? "no_grant" : status.State.ToString().ToLowerInvariant(),
+            summary = status.Describe(),
+            last_error = status.LastError,
+            used_usd = Math.Round(status.UsedUsd, 4),
+            refreshed_at = status.RefreshedAt
+        });
+    }
+
+    /// <summary>
+    /// Sets when the API key expires, as the Console shows it. Freeway cannot read
+    /// this from the key, so it estimates until told; setting it re-arms the reminders.
+    /// </summary>
+    [HttpPut("credits/key")]
+    public async Task<ActionResult> UpdateCreditKey(
+        [FromBody] UpdateCreditKeyRequest request,
+        [FromServices] Freeway.Infrastructure.Services.AnthropicKeyWatch keys)
+    {
+        var expires = request.ExpiresAt is { } e
+            ? (e.Kind == DateTimeKind.Utc ? e : e.Kind == DateTimeKind.Local ? e.ToUniversalTime() : DateTime.SpecifyKind(e, DateTimeKind.Utc))
+            : (DateTime?)null;
+
+        var key = await keys.SetExpiryAsync(expires);
+        if (key is null)
+        {
+            return NotFound(new { detail = "No Anthropic key is configured", error = "No Anthropic key is configured" });
+        }
+
+        return Ok(new { hint = key.Hint, expires_at = key.ExpiresAt, expiry_source = key.ExpirySource });
+    }
+
+    /// <summary>Emails the key-expiry reminder now, to check that mail arrives.</summary>
+    [HttpPost("credits/key/test-reminder")]
+    public async Task<ActionResult> SendCreditKeyTestReminder(
+        [FromServices] Freeway.Infrastructure.Services.AnthropicKeyWatch keys,
+        [FromServices] IEmailSender email)
+    {
+        var sent = await keys.SendTestReminderAsync();
+        return Ok(new
+        {
+            sent,
+            recipient = email.IsConfigured ? email.AdminEmail : null,
+            detail = sent ? "Reminder sent" : "Not sent: no Anthropic key, or SMTP is not configured"
+        });
+    }
+
+    /// <summary>Corrects a cycle's amount or dates to match the Console.</summary>
+    [HttpPut("credits/grants/{id:guid}")]
+    public async Task<ActionResult> UpdateCreditGrant(Guid id, [FromBody] UpdateCreditGrantRequest request)
+    {
+        var result = await Mediator.Send(new Freeway.Application.Features.Credits.Commands.UpdateCreditGrantCommand(id, request));
+        return HandleResult(result);
+    }
+
+    #endregion
+
     #region Notifications
 
     /// <summary>

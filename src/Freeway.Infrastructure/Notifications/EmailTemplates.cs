@@ -245,6 +245,7 @@ public static class EmailTemplates
         {
             ["provider"] = "billed amount reported by the provider",
             ["subscription"] = "served by local Claude Code, nothing billed",
+            ["credit"] = "paid from the Claude plan's monthly API credit, nothing billed",
             ["free_tier"] = "a provider's own free tier, genuinely zero",
             ["estimated"] = "estimated from a cached price",
             ["backfilled"] = "re-costed later at catalog prices",

@@ -357,8 +357,15 @@ function LogRow({ log }: { log: UsageLog }) {
         <span className="fig w-14 shrink-0 text-right text-xs text-text-3">
           {ms(log.response_time_ms)}
         </span>
-        <span className="fig w-20 shrink-0 text-right text-xs text-text-2">
-          {money(Number(log.cost_usd))}
+        <span
+          className="fig w-20 shrink-0 text-right text-xs text-text-2"
+          title={log.credit_cost_usd != null ? "Paid from the Claude API credit, not billed" : undefined}
+        >
+          {log.credit_cost_usd != null ? (
+            <span className="text-accent">{money(Number(log.credit_cost_usd))} cr</span>
+          ) : (
+            money(Number(log.cost_usd))
+          )}
         </span>
         <span className="hidden w-16 shrink-0 text-right text-xs text-text-3 md:block">
           {ago(log.created_at)}

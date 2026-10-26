@@ -272,6 +272,30 @@ try
         Log.Information("Local Claude is disabled; the premium lane always uses a paid model");
     }
 
+    // The Claude API credit. Counted every five minutes by default, and once now so
+    // the premium and moderate lanes can use it straight after a deploy rather than
+    // waiting for the first scheduled count.
+    var anthropicCreditEnabled =
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")) &&
+        !(bool.TryParse(Environment.GetEnvironmentVariable("ANTHROPIC_CREDIT_ENABLED"), out var ace) && !ace);
+    var anthropicCreditCron = Environment.GetEnvironmentVariable("ANTHROPIC_CREDIT_REFRESH_CRON") ?? "*/5 * * * *";
+
+    if (anthropicCreditEnabled)
+    {
+        RecurringJob.AddOrUpdate<Freeway.Infrastructure.Jobs.IAnthropicCreditJob>(
+            "anthropic-credit",
+            job => job.RefreshAsync(),
+            anthropicCreditCron);
+        BackgroundJob.Enqueue<Freeway.Infrastructure.Jobs.IAnthropicCreditJob>(job => job.RefreshAsync());
+
+        Log.Information("Anthropic credit counted on {Cron}, with one count queued now", anthropicCreditCron);
+    }
+    else
+    {
+        RecurringJob.RemoveIfExists("anthropic-credit");
+        Log.Information("Anthropic credit is off (no ANTHROPIC_API_KEY, or ANTHROPIC_CREDIT_ENABLED=false)");
+    }
+
     // Spend and credit alerts. Hourly by default: frequent enough to catch a leaked
     // key the same day, rare enough that the cooldown keeps the inbox quiet.
     var spendAlertsEnabled =

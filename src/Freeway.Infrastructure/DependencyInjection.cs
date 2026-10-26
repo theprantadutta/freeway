@@ -83,6 +83,12 @@ public static class DependencyInjection
         services.AddSingleton<IModelCooldownCache, ModelCooldownCache>();
         services.AddSingleton<ILocalClaudeHealthCache, LocalClaudeHealthCache>();
 
+        // The Claude API on the plan's monthly credit. Scoped because it counts spend
+        // from the database; the running count itself lives in the singleton ledger.
+        services.AddSingleton<AnthropicCreditLedger>();
+        services.AddScoped<IAnthropicCreditService, AnthropicCreditService>();
+        services.AddScoped<AnthropicKeyWatch>();
+
         // Register orchestrator
         services.AddScoped<IProviderOrchestrator, ProviderOrchestrator>();
 
@@ -91,6 +97,7 @@ public static class DependencyInjection
         services.AddScoped<IProviderBenchmarkJob, ProviderBenchmarkJob>();
         services.AddScoped<IModelValidationJob, ModelValidationJob>();
         services.AddScoped<ILocalClaudeHealthJob, LocalClaudeHealthJob>();
+        services.AddScoped<IAnthropicCreditJob, AnthropicCreditJob>();
 
         // Notifications
         services.AddSingleton<IEmailSender, SmtpEmailSender>();

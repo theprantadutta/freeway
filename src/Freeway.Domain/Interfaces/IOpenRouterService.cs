@@ -133,6 +133,12 @@ public class ChatCompletionResult
     public decimal? AvoidedCostUsd { get; set; }
 
     /// <summary>
+    /// What this request took off a prepaid credit balance, at list price. Set only
+    /// when it was served from one; <see cref="CostUsd"/> is then 0.
+    /// </summary>
+    public decimal? CreditCostUsd { get; set; }
+
+    /// <summary>
     /// How CostUsd was arrived at: "provider" (billed amount), "free_tier"
     /// (a provider's own free tier, genuinely zero), or "estimated".
     /// </summary>

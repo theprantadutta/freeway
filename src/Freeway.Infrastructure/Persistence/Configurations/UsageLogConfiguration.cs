@@ -69,6 +69,11 @@ public class UsageLogConfiguration : IEntityTypeConfiguration<UsageLog>
             .HasColumnName("avoided_cost_usd")
             .HasPrecision(20, 10);
 
+        // Only set on rows served from a prepaid credit grant.
+        builder.Property(u => u.CreditCostUsd)
+            .HasColumnName("credit_cost_usd")
+            .HasPrecision(20, 10);
+
         builder.Property(u => u.InputTokens)
             .HasColumnName("input_tokens")
             .HasDefaultValue(0);

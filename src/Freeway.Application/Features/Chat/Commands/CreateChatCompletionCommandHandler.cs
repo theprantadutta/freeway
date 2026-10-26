@@ -10,6 +10,7 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
     private readonly IOpenRouterService _openRouterService;
     private readonly IProviderOrchestrator _providerOrchestrator;
     private readonly ILocalClaudeService _localClaude;
+    private readonly IAnthropicCreditService _credit;
     private readonly ChatRouter _router;
     private readonly ChatUsageLogger _usageLogger;
 
@@ -17,12 +18,14 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
         IOpenRouterService openRouterService,
         IProviderOrchestrator providerOrchestrator,
         ILocalClaudeService localClaude,
+        IAnthropicCreditService credit,
         ChatRouter router,
         ChatUsageLogger usageLogger)
     {
         _openRouterService = openRouterService;
         _providerOrchestrator = providerOrchestrator;
         _localClaude = localClaude;
+        _credit = credit;
         _router = router;
         _usageLogger = usageLogger;
     }
@@ -36,7 +39,8 @@ public class CreateChatCompletionCommandHandler : IRequestHandler<CreateChatComp
             Free: () => _providerOrchestrator.ExecuteWithFallbackAsync(messages, options, cancellationToken),
             Local: priority => _localClaude.CompleteAsync(messages, options, priority, cancellationToken),
             Paid: modelId => _openRouterService.CreateChatCompletionAsync(modelId, messages, options, cancellationToken),
-            Outcome: result => result));
+            Outcome: result => result,
+            Credit: tier => _credit.CompleteAsync(messages, options, tier, cancellationToken)));
 
         if (routing is { Route: { } route, Attempt: { } attempt })
         {

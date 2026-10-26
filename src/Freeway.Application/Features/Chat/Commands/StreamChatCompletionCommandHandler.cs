@@ -18,6 +18,7 @@ public class StreamChatCompletionCommandHandler
     private readonly IOpenRouterService _openRouterService;
     private readonly IProviderOrchestrator _providerOrchestrator;
     private readonly ILocalClaudeService _localClaude;
+    private readonly IAnthropicCreditService _credit;
     private readonly ChatRouter _router;
     private readonly ChatUsageLogger _usageLogger;
 
@@ -25,12 +26,14 @@ public class StreamChatCompletionCommandHandler
         IOpenRouterService openRouterService,
         IProviderOrchestrator providerOrchestrator,
         ILocalClaudeService localClaude,
+        IAnthropicCreditService credit,
         ChatRouter router,
         ChatUsageLogger usageLogger)
     {
         _openRouterService = openRouterService;
         _providerOrchestrator = providerOrchestrator;
         _localClaude = localClaude;
+        _credit = credit;
         _router = router;
         _usageLogger = usageLogger;
     }
@@ -49,7 +52,8 @@ public class StreamChatCompletionCommandHandler
             Free: () => _providerOrchestrator.StreamWithFallbackAsync(messages, options, cancellationToken),
             Local: priority => _localClaude.StreamAsync(messages, options, priority, cancellationToken),
             Paid: modelId => _openRouterService.StreamChatCompletionAsync(modelId, messages, options, cancellationToken),
-            Outcome: stream => stream.Result));
+            Outcome: stream => stream.Result,
+            Credit: tier => _credit.StreamAsync(messages, options, tier, cancellationToken)));
 
         if (routing.Error is not null)
         {

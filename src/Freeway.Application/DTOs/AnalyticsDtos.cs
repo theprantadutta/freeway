@@ -83,6 +83,15 @@ public class UsageLogDto
     public string? RequestId { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? Provider { get; set; }
+
+    /// <summary>"provider", "subscription", "credit", "free_tier", "estimated"...</summary>
+    public string? CostSource { get; set; }
+
+    /// <summary>Taken off a prepaid credit rather than billed; cost_usd is 0 on these rows.</summary>
+    public decimal? CreditCostUsd { get; set; }
+
+    /// <summary>What a paid model would have charged, for rows served by a subscription or credit.</summary>
+    public decimal? AvoidedCostUsd { get; set; }
     public List<ChatMessageDto>? RequestMessages { get; set; }
     public string? ResponseContent { get; set; }
     public string? FinishReason { get; set; }

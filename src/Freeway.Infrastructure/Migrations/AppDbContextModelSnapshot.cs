@@ -24,6 +24,65 @@ namespace Freeway.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Freeway.Domain.Entities.CreditGrant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<decimal>("AmountUsd")
+                        .HasPrecision(20, 10)
+                        .HasColumnType("numeric(20,10)")
+                        .HasColumnName("amount_usd");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("text")
+                        .HasColumnName("note");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("auto")
+                        .HasColumnName("source");
+
+                    b.Property<DateTime>("StartsAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("starts_at");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Provider", "StartsAt")
+                        .HasDatabaseName("ix_credit_grants_provider_starts_at");
+
+                    b.ToTable("credit_grants", (string)null);
+                });
+
             modelBuilder.Entity("Freeway.Domain.Entities.Project", b =>
                 {
                     b.Property<Guid>("Id")
@@ -143,6 +202,81 @@ namespace Freeway.Infrastructure.Migrations
                     b.ToTable("provider_benchmarks", (string)null);
                 });
 
+            modelBuilder.Entity("Freeway.Domain.Entities.ProviderKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime?>("ExpiredNoticeAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expired_notice_at");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("ExpirySource")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("estimated")
+                        .HasColumnName("expiry_source");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<DateTime>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_seen_at");
+
+                    b.Property<string>("Hint")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("hint");
+
+                    b.Property<DateTime?>("LastRejectedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_rejected_at");
+
+                    b.Property<string>("LastRejection")
+                        .HasColumnType("text")
+                        .HasColumnName("last_rejection");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_seen_at");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("provider");
+
+                    b.Property<DateTime?>("RejectedNoticeAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("rejected_notice_at");
+
+                    b.Property<DateTime?>("WarnedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("warned_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Provider", "Fingerprint")
+                        .IsUnique()
+                        .HasDatabaseName("ix_provider_keys_provider_fingerprint");
+
+                    b.ToTable("provider_keys", (string)null);
+                });
+
             modelBuilder.Entity("Freeway.Domain.Entities.UsageLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -178,6 +312,11 @@ namespace Freeway.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at")
                         .HasDefaultValueSql("now()");
+
+                    b.Property<decimal?>("CreditCostUsd")
+                        .HasPrecision(20, 10)
+                        .HasColumnType("numeric(20,10)")
+                        .HasColumnName("credit_cost_usd");
 
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("text")

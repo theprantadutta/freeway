@@ -61,7 +61,11 @@ public sealed class ChatUsageLogger
             // costs -- not what Claude would have billed. For moderate those differ by
             // a factor of tens, and reporting Claude's list price there would overstate
             // the saving badly in the weekly figures.
-            if (route.ServedLocally && result.Success)
+            //
+            // The same holds for the Claude API credit: the saving is what the paid
+            // model would have charged, and what the credit went down by is recorded
+            // separately as credit_cost_usd.
+            if ((route.ServedLocally || route.ServedByCredit) && result.Success)
             {
                 result.AvoidedCostUsd = ChatRouter.EstimateAvoidedCost(route.Candidates, result) ?? result.AvoidedCostUsd;
             }
@@ -132,6 +136,7 @@ public sealed class ChatUsageLogger
                 Streamed = request.Stream,
                 TimeToFirstTokenMs = request.Stream ? timeToFirstTokenMs : null,
                 AvoidedCostUsd = result.AvoidedCostUsd,
+                CreditCostUsd = result.CreditCostUsd,
                 RequestMessages = request.Messages.Select(m => new ChatMessage
                 {
                     Role = m.Role,

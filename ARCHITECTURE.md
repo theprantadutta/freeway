@@ -346,6 +346,23 @@ text produced so far.
 
 ---
 
+## Paid lane order
+
+`ChatRouter` tries the backends for a `paid:<tier>` request in a fixed order, each one an
+optimisation the request can carry on past:
+
+1. **The Claude API credit** (`AnthropicCreditService`), for the lanes in
+   `ANTHROPIC_CREDIT_TIERS`. Skipped while `AnthropicCreditLedger` says the credit is spent
+   (Freeway's own count against the cycle in `credit_grants`), refused (balance, key, rate
+   limit) or the API looks down. Its rows carry `credit_cost_usd` with `cost_usd = 0`.
+2. **The Claude Code bridge** (`LocalClaudeService`): premium at full priority, moderate and
+   low on spare capacity only.
+3. **OpenRouter**, the tier's fallback chain. The only step that is billed.
+
+A specific model id skips 1 (and low skips 2) and goes straight to that model.
+`AnthropicCreditJob` recounts the credit every five minutes and runs
+`AnthropicKeyWatch`, which emails before the key expires and when it is rejected.
+
 ## Key Components Deep Dive
 
 ### 1. Authentication Flow (`ApiKeyAuthenticationMiddleware.cs`)

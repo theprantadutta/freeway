@@ -139,6 +139,12 @@ export interface UsageLog {
   error_message?: string;
   request_id?: string;
   provider?: string;
+  /** "provider", "subscription", "credit", "free_tier", "estimated"… */
+  cost_source?: string | null;
+  /** Taken off the Claude API credit rather than billed; cost_usd is 0 on these rows. */
+  credit_cost_usd?: number | null;
+  /** What a paid model would have charged, for rows served by a subscription or credit. */
+  avoided_cost_usd?: number | null;
   response_content?: string;
   finish_reason?: string;
   /** The caller asked for a stream. */
@@ -233,4 +239,94 @@ export interface Overview {
   top_projects: TopProject[];
   recent: RecentRequest[];
   days: number;
+}
+
+// Claude API credit — the plan's monthly allowance, spent before anything is billed.
+export type CreditState = "off" | "unchecked" | "active" | "no_grant" | "exhausted" | "blocked";
+
+export interface CreditGrant {
+  id: string;
+  amount_usd: number;
+  starts_at: string;
+  expires_at: string;
+  source: "auto" | "manual";
+  note?: string | null;
+  used_usd: number;
+  requests: number;
+}
+
+export interface CreditKey {
+  hint: string;
+  fingerprint: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  expires_at?: string | null;
+  expiry_source: "estimated" | "manual";
+  days_left?: number | null;
+  last_rejected_at?: string | null;
+  last_rejection?: string | null;
+  warned_at?: string | null;
+  expired_notice_at?: string | null;
+}
+
+export interface CreditBreakdown {
+  key: string;
+  name: string;
+  tier?: PaidTier | null;
+  requests: number;
+  credit_usd: number;
+  tokens: number;
+}
+
+export interface CreditRequest {
+  id: string;
+  created_at: string;
+  project_name: string;
+  model_id: string;
+  model_tier?: PaidTier | null;
+  input_tokens: number;
+  output_tokens: number;
+  credit_usd: number;
+  avoided_usd?: number | null;
+  response_time_ms: number;
+  streamed: boolean;
+  success: boolean;
+}
+
+export interface CreditOverview {
+  provider: string;
+  configured: boolean;
+  can_serve: boolean;
+  state: CreditState;
+  summary: string;
+  blocked_reason?: string | null;
+  blocked_until?: string | null;
+  last_error?: string | null;
+  last_error_at?: string | null;
+  refreshed_at?: string | null;
+  last_used_at?: string | null;
+  lanes: { tier: PaidTier; model: string }[];
+  stop_at_percent: number;
+  grant?: CreditGrant | null;
+  key?: CreditKey | null;
+  used_usd: number;
+  remaining_usd: number;
+  usable_usd: number;
+  used_percent: number;
+  days_total: number;
+  days_elapsed: number;
+  days_left: number;
+  burn_per_day_usd: number;
+  projected_usd: number;
+  projected_unused_usd: number;
+  requests: number;
+  failed_requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  avoided_usd: number;
+  series: { date: string; credit_usd: number; requests: number; tokens: number }[];
+  by_project: CreditBreakdown[];
+  by_model: CreditBreakdown[];
+  recent: CreditRequest[];
+  history: CreditGrant[];
 }

@@ -59,6 +59,15 @@ public class UsageLog : BaseEntity
     /// provider. Null for anything that was actually billed.
     /// </summary>
     public decimal? AvoidedCostUsd { get; set; }
+
+    /// <summary>
+    /// List price charged against a prepaid credit grant (see <see cref="CreditGrant"/>)
+    /// rather than to a card. <see cref="CostUsd"/> stays 0 on these rows, because no
+    /// money changed hands; this is what the credit balance went down by. Null on
+    /// every row not served from a credit.
+    /// </summary>
+    public decimal? CreditCostUsd { get; set; }
+
     /// <summary>The caller asked for the reply as a stream ("stream": true).</summary>
     public bool Streamed { get; set; }
 

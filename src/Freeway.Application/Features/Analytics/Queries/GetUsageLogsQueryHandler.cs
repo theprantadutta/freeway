@@ -58,6 +58,9 @@ public class GetUsageLogsQueryHandler : IRequestHandler<GetUsageLogsQuery, Resul
             RequestId = u.RequestId,
             CreatedAt = u.CreatedAt,
             Provider = u.Provider,
+            CostSource = u.CostSource,
+            CreditCostUsd = u.CreditCostUsd,
+            AvoidedCostUsd = u.AvoidedCostUsd,
             RequestMessages = u.RequestMessages?
                 .Select(m => new ChatMessageDto { Role = m.Role, Content = m.Content })
                 .ToList(),

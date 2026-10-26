@@ -16,13 +16,15 @@ namespace Freeway.Application.Features.Chat;
 /// </param>
 /// <param name="Candidates">The paid chain the request would have used, for pricing a local answer.</param>
 /// <param name="ServedLocally">The attempt went to the local Claude Code subscription.</param>
+/// <param name="ServedByCredit">The attempt went to the Claude API on the plan's monthly credit.</param>
 public sealed record ChatRoute(
     string? ModelId,
     string ModelType,
     string? ModelTier,
     CachedModel? Model,
     IReadOnlyList<(string ModelId, CachedModel? Model)> Candidates,
-    bool ServedLocally);
+    bool ServedLocally,
+    bool ServedByCredit = false);
 
 /// <summary>
 /// The calls a route can make, in whichever form the caller wants back: a finished
@@ -32,7 +34,8 @@ public sealed record ChatBackends<T>(
     Func<Task<T>> Free,
     Func<LocalClaudePriority, Task<T>> Local,
     Func<string, Task<T>> Paid,
-    Func<T, ChatCompletionResult> Outcome);
+    Func<T, ChatCompletionResult> Outcome,
+    Func<PaidTier, Task<T>>? Credit = null);
 
 /// <summary>What routing a request came to.</summary>
 public sealed class ChatRouting<T>
@@ -63,6 +66,7 @@ public sealed class ChatRouter
     private readonly IProviderModelCache _providerModelCache;
     private readonly IModelCooldownCache _modelCooldownCache;
     private readonly ILocalClaudeService _localClaude;
+    private readonly IAnthropicCreditService _credit;
     private readonly ILogger<ChatRouter> _logger;
 
     public ChatRouter(
@@ -70,12 +74,14 @@ public sealed class ChatRouter
         IProviderModelCache providerModelCache,
         IModelCooldownCache modelCooldownCache,
         ILocalClaudeService localClaude,
+        IAnthropicCreditService credit,
         ILogger<ChatRouter> logger)
     {
         _modelCacheService = modelCacheService;
         _providerModelCache = providerModelCache;
         _modelCooldownCache = modelCooldownCache;
         _localClaude = localClaude;
+        _credit = credit;
         _logger = logger;
     }
 
@@ -152,6 +158,41 @@ public sealed class ChatRouter
         // the whole request. Specific model IDs keep single-attempt semantics.
         var candidates = BuildPaidCandidates(request.Model, resolved);
 
+        // First, the Claude API on the plan's monthly credit. It comes before the
+        // subscription because it expires: credit left at the end of the cycle is
+        // simply lost, while the subscription's allowance is still there tomorrow.
+        // Like the subscription it is only ever an optimisation -- the credit
+        // paused, spent or failing, and the request carries on exactly as before.
+        //
+        // Only for the lane names ("paid:premium", "paid:moderate"). A caller naming a
+        // specific model gets that model, as it always has.
+        if (PaidTierExtensions.TryParseModel(request.Model, out var creditTier) &&
+            backends.Credit is { } credit && _credit.Serves(creditTier))
+        {
+            var status = _credit.Status;
+            if (status.CanServe)
+            {
+                var served = await credit(creditTier);
+                var outcome = backends.Outcome(served);
+                if (outcome.Success)
+                {
+                    return Finish(backends, served,
+                        new ChatRoute(null, modelType, modelTier, null, candidates, ServedLocally: false, ServedByCredit: true),
+                        failureStatus: 502);
+                }
+
+                await DiscardAsync(served);
+                _logger.LogInformation(
+                    "{Tier} request did not use the Anthropic credit ({Reason}); trying the next backend",
+                    resolved.Tier, outcome.ErrorMessage);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "{Tier} request skipped the Anthropic credit ({Status})", resolved.Tier, status.Describe());
+            }
+        }
+
         // Two lanes can be served from the local Claude Code subscription at no
         // charge, on different terms.
         //
@@ -164,10 +205,15 @@ public sealed class ChatRouter
         //
         // Both are strictly optimisations. Anything wrong and the request carries
         // on to the paid chain below with the reason in the log.
+        //
+        // Low rides along on the same spare-capacity terms as moderate, but only when
+        // asked for by lane name: OpenRouter is the last resort for every lane, and
+        // a caller naming a specific cheap model still gets that model.
         var localPriority = resolved.Tier switch
         {
             PaidTier.Premium => (LocalClaudePriority?)LocalClaudePriority.Premium,
             PaidTier.Moderate => LocalClaudePriority.Spillover,
+            PaidTier.Low when PaidTierExtensions.TryParseModel(request.Model, out _) => LocalClaudePriority.Spillover,
             _ => null
         };
 

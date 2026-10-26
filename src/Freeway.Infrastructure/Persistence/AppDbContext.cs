@@ -14,6 +14,8 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<UsageLog> UsageLogs => Set<UsageLog>();
     public DbSet<ProviderBenchmark> ProviderBenchmarks => Set<ProviderBenchmark>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<CreditGrant> CreditGrants => Set<CreditGrant>();
+    public DbSet<ProviderKey> ProviderKeys => Set<ProviderKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
