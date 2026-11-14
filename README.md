@@ -753,26 +753,30 @@ freeway/
 
 The Next.js web panel provides:
 
-### Dashboard
-- Stats overview: Total projects, active projects, requests today, monthly cost
-- Routing table: for each paid lane, the order requests are tried in - the Claude credit model, the Claude Code bridge, then the OpenRouter model as the billed last resort - with whether each is available right now; free and image show their selected model
-- Quick navigation to all features
+### Overview
+- A one-sentence summary of the window: requests, the share answered without a bill, what was paid and what was saved
+- Key figures with trends and comparisons to the previous period: billed spend, requests, share answered free, savings, response time (median and 95th percentile), and the Claude credit as a ring
+- Traffic map: every request flowing from the app that sent it, through the lane it asked for, to what answered it (Claude credit, Claude Code, free providers, or OpenRouter). Point at any app, lane, answerer or ribbon to light up its path with exact figures; switch between requests and tokens, or view it as a table
+- Requests per day stacked by lane, with a per-day readout and requests, tokens, billed and credit views
+- Who answered: each route's share of the window and whether it can take traffic now, including the Claude plan's five-hour and seven-day usage
+- Project and model leaderboards with sparklines, the live request feed (new requests slide in; open one for its cost and how it was served), and alerts that need attention
+- 7, 30 or 90 day windows; refreshes every 30 seconds
 
 ### Design system
 
-Each model type owns a hue and keeps it everywhere it appears, so colour carries
-information rather than decorating: free is green, then the paid tiers run low blue,
-moderate amber, premium rose as a cost ladder, and image sits apart in violet. The
-mapping lives once in `src/lib/theme/accents.ts`.
+The console is drawn like a highway at night: a midnight-navy surface, ink for
+structure, and the five lanes lit in their own colours. Text is set in Overpass, a
+descendant of the US highway-sign alphabet. Hue means one thing only, which lane a
+request took: free, low, moderate, premium and image, a categorical set validated for
+colour-blind safety in both themes. Text never wears a lane colour; a dot, stripe or
+bar beside it carries the identity. Who answered a request is told by name and icon,
+never by colour. Motion is reserved for one entrance per page, for things that are
+live, and for responses to what you do, and it is switched off for reduced motion.
 
-Chart marks are separate tokens from text tokens: marks want mid tones, text wants
-contrast against its surface. The mark set is validated for lightness band, chroma
-floor, colour-blind separation and surface contrast, and passes in both light and
-dark, so the same values are used in either mode.
-
-> Accent classes are referenced through `accents.ts` rather than written literally in
-> markup, so `tailwind.config.ts` must scan all of `./src/**`. Narrowing that glob
-> silently purges every lane colour.
+> Lane classes are referenced through `src/lib/theme/lanes.ts` rather than written
+> literally in markup, so `tailwind.config.ts` must scan all of `./src/**`. The page
+> colour is named `page`, never `base`: a colour called `base` makes `text-base`
+> paint text in the background colour.
 
 ### Models
 - Browse all available models (free, paid, and image tabs)

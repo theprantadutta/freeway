@@ -1,13 +1,10 @@
 import { HTMLAttributes, ReactNode, forwardRef } from "react";
 import { cn } from "@/lib/utils/cn";
 
-/**
- * A hairline box lifted out of the field. Deliberately no shadow: shadows imply
- * paper, and this is a screen showing live numbers.
- */
+/** A card lifted off the road surface. See `.card` in globals.css. */
 const Panel = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn("panel overflow-hidden", className)} {...props} />
+    <div ref={ref} className={cn("card overflow-hidden", className)} {...props} />
   )
 );
 Panel.displayName = "Panel";
@@ -16,23 +13,27 @@ function PanelHead({
   title,
   meta,
   action,
+  icon,
   className,
 }: {
   title: ReactNode;
   meta?: ReactNode;
   action?: ReactNode;
+  icon?: ReactNode;
   className?: string;
 }) {
   return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-4 border-b border-hair px-4 py-3",
-        className
-      )}
-    >
-      <div className="min-w-0">
-        <h2 className="truncate text-sm font-semibold text-text">{title}</h2>
-        {meta && <p className="mt-0.5 truncate text-xs text-text-3">{meta}</p>}
+    <div className={cn("flex items-start justify-between gap-4 px-5 pb-1 pt-5 sm:px-6", className)}>
+      <div className="flex min-w-0 items-start gap-3">
+        {icon && (
+          <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sunken text-text-2 ring-1 ring-hair">
+            {icon}
+          </span>
+        )}
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold text-text">{title}</h2>
+          {meta && <p className="mt-0.5 text-sm text-text-3">{meta}</p>}
+        </div>
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>
@@ -40,18 +41,24 @@ function PanelHead({
 }
 
 function PanelBody({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("p-4", className)} {...props} />;
+  return <div className={cn("px-5 pb-5 pt-4 sm:px-6", className)} {...props} />;
 }
 
-/**
- * A section marker: a small label sitting on a hairline that runs to the edge.
- * Sections are announced by structure here rather than by another bold heading.
- */
-function Rule({ children, action }: { children: ReactNode; action?: ReactNode }) {
+/** A section heading with its controls on the same line. */
+function Rule({
+  children,
+  action,
+  description,
+}: {
+  children: ReactNode;
+  action?: ReactNode;
+  description?: ReactNode;
+}) {
   return (
-    <div className="mb-3 flex items-center gap-3">
-      <div className="rule flex-1">
-        <span className="text-2xs font-medium uppercase text-text-3">{children}</span>
+    <div className="mb-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+      <div className="min-w-0">
+        <h2 className="text-xl font-bold text-text">{children}</h2>
+        {description && <p className="mt-1 max-w-2xl text-base text-text-3">{description}</p>}
       </div>
       {action}
     </div>

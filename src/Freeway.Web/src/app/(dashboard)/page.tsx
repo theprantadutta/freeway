@@ -3,31 +3,23 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, ArrowRight, CircleAlert } from "lucide-react";
-import { PageHead } from "@/components/shell/page-head";
+import { AlertTriangle, ChevronDown, CircleAlert, Info } from "lucide-react";
+import { LiveFeed, ModelsTable } from "@/components/overview/sections";
 import { Panel, PanelHead, Rule } from "@/components/ui/panel";
-import { Tag } from "@/components/ui/tag";
-import { Pulse } from "@/components/ui/pulse";
-import { Failed, Empty } from "@/components/ui/state";
 import { Segmented } from "@/components/ui/segmented";
-import { SeriesChart } from "@/components/chart/series-chart";
-import { LaneSplit } from "@/components/chart/lane-split";
+import { Pulse } from "@/components/ui/pulse";
+import { Failed } from "@/components/ui/state";
+import { Tag } from "@/components/ui/tag";
+import { AnimatedNumber, Delta, LaneDot, Meter, Ring, Sparkline } from "@/components/charts/primitives";
+import { LaneChart } from "@/components/charts/lane-chart";
+import { TrafficMap } from "@/components/charts/traffic-map";
 import { analyticsApi } from "@/lib/api/analytics";
-import { modelsApi } from "@/lib/api/models";
 import { creditsApi } from "@/lib/api/credits";
-import { LANES, laneOf, laneLabel } from "@/lib/theme/lanes";
+import { laneOf } from "@/lib/theme/lanes";
+import { BACKEND_ORDER, backendOf } from "@/lib/theme/backends";
 import { cn } from "@/lib/utils/cn";
-import {
-  ago,
-  change,
-  compact,
-  count,
-  currentMonthLabel,
-  modelShortName,
-  money,
-  ms,
-  pct,
-} from "@/lib/utils/format";
+import { cents, count, money, ms, pct } from "@/lib/utils/format";
+import type { Overview } from "@/lib/types";
 
 type Window = "7" | "30" | "90";
 
@@ -37,473 +29,307 @@ export default function OverviewPage() {
   const q = useQuery({
     queryKey: ["overview", days],
     queryFn: () => analyticsApi.getOverview(Number(days)),
+    refetchInterval: 30_000,
+    placeholderData: (prev) => prev,
   });
 
   const o = q.data;
-  const t = o?.totals;
-  const reqDelta = t ? change(t.requests_this_month, t.requests_previous_month) : null;
 
   return (
-    <div className="space-y-7">
-      <PageHead
-        title="Overview"
-        lede={`What moved through the gateway. Figures cover ${currentMonthLabel()} unless a window says otherwise.`}
-        actions={
-          <Segmented
-            label="Time window"
-            value={days}
-            onChange={setDays}
-            segments={[
-              { value: "7", label: "7d" },
-              { value: "30", label: "30d" },
-              { value: "90", label: "90d" },
-            ]}
-          />
-        }
-      />
+    <div className="space-y-10">
+      <Headline o={o} loading={q.isLoading} days={Number(days)} />
+
+      <div className="reveal flex flex-wrap items-center gap-4" style={{ ["--d" as string]: "80ms" }}>
+        <Segmented
+          label="Time window"
+          value={days}
+          onChange={setDays}
+          segments={[
+            { value: "7", label: "7 days" },
+            { value: "30", label: "30 days" },
+            { value: "90", label: "90 days" },
+          ]}
+        />
+        <span className="flex items-center gap-2 text-sm text-text-3">
+          <span className="live-dot h-2 w-2 rounded-full bg-ok text-ok" aria-hidden />
+          Live, refreshing every 30 seconds
+        </span>
+      </div>
 
       {q.isError ? (
         <Failed
-          title="Could not load the console"
-          body="The gateway did not return its overview. Check that the API is reachable."
+          title="Could not load the overview"
+          body="The gateway did not return its figures. Check that the API is reachable."
           onRetry={() => q.refetch()}
         />
       ) : (
-        <>
-          {/* The month's spend is the figure this page is about, so it gets the
-              display size and the chart sits beside it rather than under a row of
-              equal-weight tiles. */}
-          <section className="enter grid gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-            <Panel className="lane-premium lane-halo flex flex-col justify-between p-5">
-              <div>
-                <p className="text-2xs font-medium uppercase text-text-3">
-                  Spent in {currentMonthLabel()}
-                </p>
-                {q.isLoading ? (
-                  <Pulse className="mt-3 h-14 w-44" />
-                ) : (
-                  <p className="fig-hero mt-3 text-5xl text-text">
-                    {money(Number(t?.cost_this_month ?? 0))}
-                  </p>
-                )}
-                <Delta
-                  current={Number(t?.cost_this_month ?? 0)}
-                  previous={Number(t?.cost_previous_month ?? 0)}
-                  suffix="vs last month"
-                />
-              </div>
+        <div className={cn("space-y-10 transition-opacity duration-300", q.isFetching && q.isPlaceholderData && "opacity-60")}>
+          <Attention />
+          <Kpis o={o} />
 
-              <dl className="mt-6 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-hair pt-4">
-                <Figure label="Requests" value={compact(t?.requests_this_month)} loading={q.isLoading} />
-                <Figure
-                  label="Requests Δ"
-                  value={
-                    reqDelta == null
-                      ? "—"
-                      : Math.abs(reqDelta) >= 1000
-                        ? `×${compact((t?.requests_this_month ?? 0) / (t?.requests_previous_month || 1))}`
-                        : `${reqDelta > 0 ? "+" : ""}${reqDelta.toFixed(0)}%`
-                  }
-                  loading={q.isLoading}
-                />
-                <Figure label="Tokens" value={compact(t?.tokens_this_month)} loading={q.isLoading} />
-                <Figure
-                  label="Success"
-                  value={pct(t?.success_rate_this_month, 1)}
-                  loading={q.isLoading}
-                  tone={t && t.success_rate_this_month < 95 ? "bad" : undefined}
-                />
-                <Figure label="Avg latency" value={ms(t?.avg_response_ms_this_month)} loading={q.isLoading} />
-                <Figure label="All time" value={money(Number(t?.cost_all_time ?? 0))} loading={q.isLoading} />
-              </dl>
+          <Panel className="reveal" style={{ ["--d" as string]: "200ms" }}>
+            {o ? <TrafficMap flows={o.flows} days={o.days} /> : <Pulse className="m-6 h-[28rem]" />}
+          </Panel>
+
+          <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_25rem]">
+            <Panel className="reveal" style={{ ["--d" as string]: "260ms" }}>
+              {o ? <LaneChart series={o.series} height={360} /> : <Pulse className="m-6 h-80" />}
             </Panel>
-
-            <Panel className="flex min-h-[20rem] flex-col">
-              {q.isLoading ? (
-                <div className="flex flex-1 items-end gap-px p-4">
-                  {Array.from({ length: 30 }).map((_, i) => (
-                    <Pulse key={i} className="flex-1" style={{ height: `${20 + ((i * 37) % 70)}%` }} />
-                  ))}
-                </div>
-              ) : (
-                <SeriesChart points={o?.series ?? []} className="flex-1 pb-4" />
-              )}
-            </Panel>
+            <Routes o={o} />
           </section>
 
-          <section>
-            <Rule>Where it went · last {days} days</Rule>
-            <div className="enter grid gap-4 lg:grid-cols-3">
-              <Panel>
-                <PanelHead title="By lane" meta="Share of requests" />
-                {q.isLoading ? (
-                  <div className="space-y-3 p-4">
-                    <Pulse className="h-2.5 w-full rounded-full" />
-                    <Pulse className="h-16 w-full" />
-                  </div>
-                ) : (
-                  <LaneSplit lanes={o?.lanes ?? []} />
-                )}
-              </Panel>
-
-              <Panel>
-                <PanelHead title="Busiest models" meta="By request count" />
-                {q.isLoading ? (
-                  <div className="space-y-2 p-4">
-                    {Array.from({ length: 4 }).map((_, i) => (
-                      <Pulse key={i} className="h-7 w-full" />
-                    ))}
-                  </div>
-                ) : (o?.top_models.length ?? 0) === 0 ? (
-                  <Empty
-                    className="lane-accent py-10"
-                    icon={Activity}
-                    title="No traffic yet"
-                    body="Send a request through the gateway and it will appear here."
-                  />
-                ) : (
-                  <ul className="divide-y divide-hair">
-                    {o!.top_models.map((m) => {
-                      const lane = laneOf(m.model_type, m.model_tier);
-                      const max = Math.max(...o!.top_models.map((x) => x.requests), 1);
-                      return (
-                        <li key={`${m.model_id}-${m.model_tier ?? ""}`} className={cn(lane.scope, "px-4 py-2.5")}>
-                          <div className="flex items-baseline justify-between gap-3">
-                            <span className="truncate font-mono text-xs text-text">
-                              {modelShortName(m.model_id)}
-                            </span>
-                            <span className="fig shrink-0 text-xs text-text-2">
-                              {compact(m.requests)}
-                            </span>
-                          </div>
-                          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-sunken">
-                            <div
-                              className="h-full rounded-full lane-bg transition-[width] duration-500 ease-out"
-                              style={{ width: `${Math.max((m.requests / max) * 100, 2)}%` }}
-                            />
-                          </div>
-                          <div className="mt-1 flex items-center justify-between">
-                            <span className="text-2xs lane-fg">{lane.label}</span>
-                            <span className="fig text-2xs text-text-3">{money(Number(m.cost))}</span>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </Panel>
-
-              <Panel>
-                <PanelHead
-                  title="Busiest projects"
-                  meta="By request count"
-                  action={
-                    <Link
-                      href="/projects"
-                      className="inline-flex items-center gap-1 rounded text-xs font-medium text-accent hover:underline"
-                    >
-                      All
-                      <ArrowRight className="h-3 w-3" aria-hidden />
-                    </Link>
-                  }
-                />
-                {q.isLoading ? (
-                  <div className="space-y-2 p-4">
-                    {Array.from({ length: 4 }).map((_, i) => (
-                      <Pulse key={i} className="h-7 w-full" />
-                    ))}
-                  </div>
-                ) : (o?.top_projects.length ?? 0) === 0 ? (
-                  <Empty
-                    className="lane-accent py-10"
-                    icon={Activity}
-                    title="No project traffic"
-                    body="Traffic attributed to a project key shows up here."
-                  />
-                ) : (
-                  <ul className="divide-y divide-hair">
-                    {o!.top_projects.map((p) => (
-                      <li key={p.project_id}>
-                        <Link
-                          href={`/projects/${p.project_id}`}
-                          className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-raised"
-                        >
-                          <span
-                            className={cn(
-                              "h-1.5 w-1.5 shrink-0 rounded-full",
-                              p.is_active ? "bg-ok" : "bg-text-3"
-                            )}
-                            aria-hidden
-                          />
-                          <span className="min-w-0 flex-1 truncate text-sm text-text">{p.name}</span>
-                          <span className="fig shrink-0 text-xs text-text-2">
-                            {compact(p.requests)}
-                          </span>
-                          <span className="fig w-20 shrink-0 text-right text-xs text-text-3">
-                            {money(Number(p.cost))}
-                          </span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Panel>
-            </div>
+          <section className="grid gap-6 2xl:grid-cols-2">
+            <ProjectsTable o={o} />
+            <ModelsTable rows={o?.top_models ?? []} loading={!o} />
           </section>
 
-          <section>
-            <Rule>Live traffic</Rule>
-            <Panel>
-              {q.isLoading ? (
-                <div className="divide-y divide-hair">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                      <Pulse className="h-4 w-4 shrink-0 rounded-full" />
-                      <Pulse className="h-3 flex-1" />
-                      <Pulse className="h-3 w-20 shrink-0" />
-                    </div>
-                  ))}
-                </div>
-              ) : (o?.recent.length ?? 0) === 0 ? (
-                <Empty
-                  className="lane-accent"
-                  icon={Activity}
-                  title="Nothing has come through yet"
-                  body="Every request is logged here with its lane, latency and cost."
-                />
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[42rem] text-sm">
-                    <thead>
-                      <tr className="border-b border-hair text-left">
-                        {["", "Project", "Model", "Lane", "Tokens", "Latency", "Cost", "When"].map(
-                          (h, i) => (
-                            <th
-                              key={i}
-                              className={cn(
-                                "px-3 py-2 text-2xs font-medium uppercase text-text-3",
-                                i >= 4 && "text-right"
-                              )}
-                            >
-                              {h}
-                            </th>
-                          )
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-hair">
-                      {o!.recent.map((r) => {
-                        const lane = laneOf(r.model_type, r.model_tier);
-                        return (
-                          <tr key={r.id} className={cn(lane.scope, "transition-colors hover:bg-raised")}>
-                            <td className="w-8 px-3 py-2.5">
-                              {r.success ? (
-                                <span className="block h-1.5 w-1.5 rounded-full bg-ok" aria-label="ok" />
-                              ) : (
-                                <CircleAlert className="h-3.5 w-3.5 text-bad" aria-label="failed" />
-                              )}
-                            </td>
-                            <td className="max-w-[10rem] truncate px-3 py-2.5 text-text-2">
-                              {r.project_name}
-                            </td>
-                            <td className="max-w-[16rem] truncate px-3 py-2.5 font-mono text-xs text-text">
-                              {modelShortName(r.model_id)}
-                            </td>
-                            <td className="px-3 py-2.5">
-                              <Tag tone="lane" mono>
-                                {laneLabel(r.model_type, r.model_tier)}
-                              </Tag>
-                            </td>
-                            <td className="fig px-3 py-2.5 text-right text-xs text-text-2">
-                              {compact(r.total_tokens)}
-                            </td>
-                            <td className="fig px-3 py-2.5 text-right text-xs text-text-2">
-                              {ms(r.response_time_ms)}
-                            </td>
-                            <td className="fig px-3 py-2.5 text-right text-xs text-text">
-                              {money(Number(r.cost_usd))}
-                            </td>
-                            <td className="px-3 py-2.5 text-right text-xs text-text-3">
-                              {ago(r.created_at)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Panel>
-          </section>
-
-          <section>
-            <Rule
-              action={
-                <Link
-                  href="/models"
-                  className="inline-flex items-center gap-1 rounded text-xs font-medium text-accent hover:underline"
-                >
-                  Change routing
-                  <ArrowRight className="h-3 w-3" aria-hidden />
-                </Link>
-              }
-            >
-              Routing table
-            </Rule>
-            <LaneRouting />
-          </section>
-        </>
+          <LiveFeed recent={o?.recent ?? []} loading={!o} />
+        </div>
       )}
     </div>
   );
 }
 
-function Figure({
-  label,
-  value,
-  loading,
-  tone,
-}: {
-  label: string;
-  value: string;
-  loading?: boolean;
-  tone?: "bad";
-}) {
-  return (
-    <div>
-      <dt className="text-2xs uppercase text-text-3">{label}</dt>
-      <dd className={cn("fig mt-0.5 text-sm", tone === "bad" ? "text-bad" : "text-text")}>
-        {loading ? <Pulse className="h-4 w-14" /> : value}
-      </dd>
-    </div>
-  );
-}
-
-function Delta({
-  current,
-  previous,
-  suffix,
-}: {
-  current: number;
-  previous: number;
-  suffix: string;
-}) {
-  if (!previous) {
-    return <p className="mt-2 text-xs text-text-3">nothing last month to compare against</p>;
-  }
-
-  const percent = ((current - previous) / previous) * 100;
-  const up = percent > 0;
-
-  // Growing from almost nothing produces percentages like 388,914%, which is
-  // arithmetically right and tells you nothing. Past an order of magnitude a
-  // multiplier is the readable form.
-  const label =
-    Math.abs(percent) >= 1000
-      ? `×${compact(current / previous)}`
-      : `${Math.abs(percent).toFixed(0)}%`;
-
-  return (
-    <p className="mt-2 text-xs">
-      <span className={cn("fig font-medium", up ? "text-bad" : "text-ok")}>
-        {up ? "▲" : "▼"} {label}
-      </span>
-      <span className="ml-1.5 text-text-3">{suffix}</span>
-    </p>
-  );
-}
-
 /**
- * Where each lane's requests actually go, in the order they are tried. A paid lane
- * tries the Claude API credit, then the Claude Code bridge, and only then its
- * OpenRouter model -- so listing the OpenRouter model alone, as this used to, showed
- * the last resort as if it were the answer.
+ * The page's opening line: what happened, in a sentence, with the figures in it.
+ * Read once, it answers the questions this console is opened to ask.
  */
-function LaneRouting() {
-  const free = useQuery({ queryKey: ["model", "free"], queryFn: () => modelsApi.getSelectedFreeModel() });
-  const low = useQuery({ queryKey: ["model", "paid", "low"], queryFn: () => modelsApi.getSelectedPaidModelForTier("low") });
-  const moderate = useQuery({ queryKey: ["model", "paid", "moderate"], queryFn: () => modelsApi.getSelectedPaidModelForTier("moderate") });
-  const premium = useQuery({ queryKey: ["model", "paid", "premium"], queryFn: () => modelsApi.getSelectedPaidModelForTier("premium") });
-  const image = useQuery({ queryKey: ["model", "image"], queryFn: () => modelsApi.getSelectedImageModel() });
-  const credit = useQuery({ queryKey: ["credits"], queryFn: creditsApi.getOverview });
-  const bridge = useQuery({ queryKey: ["local-claude"], queryFn: creditsApi.getLocalClaude });
-
-  const rows = [
-    { lane: LANES.free, q: free, tier: null },
-    { lane: LANES.low, q: low, tier: "low" },
-    { lane: LANES.moderate, q: moderate, tier: "moderate" },
-    { lane: LANES.premium, q: premium, tier: "premium" },
-    { lane: LANES.image, q: image, tier: null },
-  ] as const;
-
-  const creditOn = credit.data?.configured ?? false;
-  const creditReady = credit.data?.can_serve ?? false;
-  const bridgeOn = bridge.data?.configured ?? false;
-  const bridgeReady = bridge.data?.can_serve ?? false;
+function Headline({ o, loading, days }: { o?: Overview; loading: boolean; days: number }) {
+  if (loading || !o) {
+    return (
+      <div className="space-y-3">
+        <Pulse className="h-12 w-full max-w-3xl" />
+        <Pulse className="h-12 w-2/3 max-w-2xl" />
+      </div>
+    );
+  }
+  const w = o.window;
+  const freeShare = w.requests ? Math.round((w.unbilled / w.requests) * 100) : 0;
 
   return (
-    <Panel>
-      <ul className="divide-y divide-hair">
-        {rows.map(({ lane, q, tier }) => {
-          const creditModel = tier ? credit.data?.lanes.find((l) => l.tier === tier)?.model : undefined;
-          const steps: { label: string; detail: string; ready: boolean; billed?: boolean }[] = [];
-          if (creditOn && creditModel) {
-            steps.push({ label: creditModel, detail: "Claude credit", ready: creditReady });
-          }
-          if (tier && bridgeOn) {
-            steps.push({
-              label: "Claude Code",
-              detail: tier === "premium" ? "bridge" : "bridge, spare capacity",
-              ready: bridgeReady,
-            });
-          }
-          const fallback = q.data?.model_id ?? "not selected";
+    <header className="reveal max-w-5xl">
+      <p className="text-base font-semibold text-text-3">Overview, last {days} days</p>
+      <h1 className="mt-3 text-3xl font-extrabold leading-tight text-text sm:text-4xl xl:text-[3.25rem] xl:leading-[1.08]">
+        {count(w.requests)} requests, {freeShare}% answered without a bill.{" "}
+        <span className="text-text-2">
+          You paid {cents(Number(w.cost))}
+          {Number(w.avoided_usd) > 0 && <> and saved about {cents(Number(w.avoided_usd))}</>}.
+        </span>
+      </h1>
+    </header>
+  );
+}
 
+function Kpis({ o }: { o?: Overview }) {
+  const credit = useQuery({ queryKey: ["credits"], queryFn: creditsApi.getOverview, refetchInterval: 60_000 });
+  const w = o?.window;
+  const p = o?.previous_window;
+  const series = o?.series ?? [];
+  const c = credit.data;
+
+  const cells = [
+    {
+      label: "Billed",
+      value: w ? <AnimatedNumber value={Number(w.cost)} format={cents} /> : null,
+      foot: w && p ? <Delta current={Number(w.cost)} previous={Number(p.cost)} upIsGood={false} /> : null,
+      trend: series.map((s) => Number(s.cost)),
+      note: "Charged by OpenRouter. Everything else was free.",
+    },
+    {
+      label: "Requests",
+      value: w ? <AnimatedNumber value={w.requests} format={(v) => count(Math.round(v))} /> : null,
+      foot: w && p ? <Delta current={w.requests} previous={p.requests} /> : null,
+      trend: series.map((s) => s.requests),
+      note: w ? `${pct(w.requests ? ((w.requests - w.failures) / w.requests) * 100 : 100, 1)} succeeded` : "",
+    },
+    {
+      label: "Answered free",
+      value: w ? <AnimatedNumber value={w.requests ? (w.unbilled / w.requests) * 100 : 0} format={(v) => `${v.toFixed(0)}%`} /> : null,
+      foot: w ? <Meter value={w.requests ? (w.unbilled / w.requests) * 100 : 0} warnAt={101} badAt={101} label="Share answered without a bill" className="mt-2" /> : null,
+      note: w ? `${count(w.unbilled)} by the credit, Claude Code or free providers` : "",
+    },
+    {
+      label: "Saved",
+      value: w ? <AnimatedNumber value={Number(w.avoided_usd)} format={cents} /> : null,
+      trend: series.map((s) => Number(s.avoided_usd ?? 0)),
+      note: "What paid models would have charged for the free answers",
+    },
+    {
+      label: "Response time",
+      value: w ? <AnimatedNumber value={w.p50_response_ms} format={(v) => ms(v)} /> : null,
+      note: w ? `Median. 95% finish within ${ms(w.p95_response_ms)}` : "",
+    },
+  ];
+
+  return (
+    <section className="reveal grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6" style={{ ["--d" as string]: "140ms" }} aria-label="Key figures">
+      <Panel className="flex flex-col justify-between p-5 sm:col-span-2 lg:col-span-1 lg:row-span-2 2xl:row-span-1">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-base font-semibold text-text-2">Claude credit</p>
+            <p className="mt-1 text-sm text-text-3">
+              {c?.grant ? `Resets in ${Math.ceil(c.days_left)} days` : c?.configured === false ? "Not set up" : " "}
+            </p>
+          </div>
+          <Link href="/credits" className="text-sm font-semibold text-text-2 underline-offset-4 hover:text-text hover:underline">
+            Details
+          </Link>
+        </div>
+        <div className="mt-4 flex items-center gap-4">
+          <Ring value={c?.used_percent ?? 0} label="Claude credit used" size={84} stroke={8} warnAt={80} badAt={95}>
+            <span>
+              <span className="num block text-lg font-extrabold text-text">{c ? `${Math.round(c.used_percent)}%` : "–"}</span>
+              <span className="block text-2xs text-text-3">used</span>
+            </span>
+          </Ring>
+          <div className="min-w-0">
+            <p className="num text-2xl font-extrabold text-text">
+              {c ? <AnimatedNumber value={c.remaining_usd} format={cents} /> : <Pulse className="h-7 w-20" />}
+            </p>
+            <p className="text-sm text-text-3">left of {c?.grant ? cents(c.grant.amount_usd) : "the grant"}</p>
+          </div>
+        </div>
+      </Panel>
+
+      {cells.map((cell) => (
+        <Panel key={cell.label} className="flex min-h-[11rem] flex-col p-5">
+          <p className="text-base font-semibold text-text-2">{cell.label}</p>
+          <p className="mt-2 text-3xl font-extrabold text-text">{cell.value ?? <Pulse className="h-9 w-24" />}</p>
+          {cell.foot}
+          <div className="mt-auto pt-3">
+            {cell.trend && cell.trend.length > 1 && <Sparkline values={cell.trend} height={34} />}
+            {cell.note && <p className="mt-2 text-sm text-text-3">{cell.note}</p>}
+          </div>
+        </Panel>
+      ))}
+    </section>
+  );
+}
+
+/** Things that need doing, from the same checks that send alert emails. Quiet when there are none. */
+function Attention() {
+  const alerts = useQuery({ queryKey: ["alerts"], queryFn: analyticsApi.getAlerts, staleTime: 10 * 60_000 });
+  const [open, setOpen] = useState(false);
+  const list = alerts.data?.alerts ?? [];
+  if (list.length === 0) return null;
+
+  const critical = list.filter((a) => a.severity === 2).length;
+
+  return (
+    <section className={cn("reveal rounded-panel border px-5 py-4", critical ? "border-bad/35 bg-bad/[0.06]" : "border-warn/35 bg-warn/[0.06]")}>
+      <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-3 text-left">
+        <AlertTriangle className={cn("h-5 w-5 shrink-0", critical ? "text-bad" : "text-warn")} aria-hidden />
+        <span className="flex-1 text-base font-bold text-text">
+          {list.length === 1 ? "1 thing needs attention" : `${list.length} things need attention`}
+          <span className="ml-2 font-normal text-text-2">{list[0].title}{list.length > 1 ? " and more" : ""}</span>
+        </span>
+        <ChevronDown className={cn("h-5 w-5 text-text-3 transition-transform duration-300", open && "rotate-180")} aria-hidden />
+      </button>
+      {open && (
+        <ul className="mt-4 space-y-3 animate-lift">
+          {list.map((a) => (
+            <li key={a.key} className="flex gap-3 rounded-xl bg-panel/70 p-4 ring-1 ring-hair">
+              {a.severity === 2 ? (
+                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-bad" aria-label="Critical" />
+              ) : a.severity === 1 ? (
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-label="Warning" />
+              ) : (
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-text-2" aria-label="Information" />
+              )}
+              <div className="min-w-0">
+                <p className="text-base font-semibold text-text">{a.title}</p>
+                <p className="mt-0.5 text-sm text-text-2">{a.detail}</p>
+                {a.action && <p className="mt-1.5 text-sm text-text-3">{a.action}</p>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** The three routes, right now, and how much of the window each answered. */
+function Routes({ o }: { o?: Overview }) {
+  const bridge = useQuery({ queryKey: ["local-claude"], queryFn: analyticsApi.getLocalClaude, refetchInterval: 60_000 });
+  const credit = useQuery({ queryKey: ["credits"], queryFn: creditsApi.getOverview, refetchInterval: 60_000 });
+  const total = o?.window.requests ?? 0;
+  const byBackend = new Map((o?.backends ?? []).map((b) => [b.backend, b]));
+  const b = bridge.data;
+  const c = credit.data;
+
+  const plan = b?.plan?.windows ?? {};
+  const fiveHour = plan["five_hour"]?.utilization_percent;
+  const sevenDay = plan["seven_day"]?.utilization_percent;
+
+  const status = (key: string) => {
+    if (key === "credit") return !c ? null : !c.configured ? ["Off", "neutral"] : c.can_serve ? ["Available", "ok"] : ["Paused", "bad"];
+    if (key === "bridge") return !b ? null : !b.configured ? ["Off", "neutral"] : b.can_serve ? ["Available", "ok"] : [b.state === "ratelimited" ? "Rate limited" : "Unavailable", "bad"];
+    if (key === "openrouter") return ["Standby", "neutral"];
+    return ["Always on", "ok"];
+  };
+
+  return (
+    <Panel className="reveal flex flex-col" style={{ ["--d" as string]: "300ms" }}>
+      <PanelHead title="Who answered" meta="Each route's share of the window, and whether it can take traffic now" />
+      <ul className="mt-2 flex-1 divide-y divide-hair px-5 pb-2 sm:px-6">
+        {BACKEND_ORDER.filter((k) => k !== "other" || byBackend.has("other")).map((k) => {
+          const meta = backendOf(k);
+          const u = byBackend.get(k);
+          const share = total && u ? (u.requests / total) * 100 : 0;
+          const s = status(k);
           return (
-            <li
-              key={lane.key}
-              className={cn(lane.scope, "flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3")}
-            >
-              <span className="flex w-28 shrink-0 items-center gap-2">
-                <span className="h-2 w-2 rounded-full lane-bg" aria-hidden />
-                <span className="text-sm font-medium text-text">{lane.label}</span>
-              </span>
-              <code className="shrink-0 rounded bg-sunken px-1.5 py-0.5 font-mono text-2xs lane-fg">
-                {lane.model}
-              </code>
-              <ol className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-                {steps.map((s) => (
-                  <li key={s.label} className="flex items-center gap-2">
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className={cn("h-1.5 w-1.5 rounded-full", s.ready ? "bg-ok" : "bg-text-3")}
-                        title={s.ready ? "available now" : "not available right now; skipped"}
-                        aria-hidden
-                      />
-                      <span className="font-mono text-xs text-text">{s.label}</span>
-                      <span className="text-2xs text-text-3">{s.detail}</span>
-                    </span>
-                    <ArrowRight className="h-3 w-3 shrink-0 text-text-3" aria-hidden />
-                  </li>
-                ))}
-                <li className="flex min-w-0 items-center gap-1.5">
-                  {q.isLoading ? (
-                    <Pulse className="h-3 w-48" />
-                  ) : (
-                    <>
-                      <span className={cn("truncate font-mono text-xs", steps.length ? "text-text-3" : "text-text-2")}>
-                        {fallback}
-                      </span>
-                      {steps.length > 0 && <span className="text-2xs text-text-3">OpenRouter, last resort</span>}
-                    </>
-                  )}
-                </li>
-              </ol>
-              {q.data?.pricing && (
-                <span className="fig shrink-0 text-2xs text-text-3">
-                  {money(parseFloat(q.data.pricing.prompt) * 1_000_000)} in ·{" "}
-                  {money(parseFloat(q.data.pricing.completion) * 1_000_000)} out /M
+            <li key={k} className="py-4">
+              <div className="flex items-center gap-3">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-sunken text-text-2 ring-1 ring-hair">
+                  <meta.icon className="h-4 w-4" aria-hidden />
                 </span>
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-2 text-base font-bold text-text">
+                    {meta.label}
+                    {meta.billed && <Tag tone="warn">billed</Tag>}
+                  </p>
+                  <p className="text-sm text-text-3">
+                    {u ? `${count(u.requests)} requests, ${ms(u.avg_response_ms)} average` : "No requests in this window"}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="num text-xl font-extrabold text-text">{pct(share)}</p>
+                  {s && (
+                    <p className="flex items-center justify-end gap-1.5 text-xs text-text-3">
+                      <span className={cn("h-1.5 w-1.5 rounded-full", s[1] === "ok" ? "bg-ok" : s[1] === "bad" ? "bg-bad" : "bg-text-3")} aria-hidden />
+                      {s[0]}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-hair-bright/60">
+                <div
+                  className={cn("h-full rounded-full transition-[width] duration-1000 ease-out", meta.billed ? "bg-warn" : "bg-text-2")}
+                  style={{ width: `${share}%` }}
+                />
+              </div>
+              {k === "bridge" && b?.configured && (fiveHour != null || sevenDay != null) && (
+                <div className="mt-3 grid grid-cols-2 gap-4">
+                  {fiveHour != null && (
+                    <div>
+                      <p className="mb-1.5 flex justify-between text-xs text-text-3"><span>Plan, 5 hours</span><span className="tnum font-semibold text-text-2">{Math.round(fiveHour)}%</span></p>
+                      <Meter value={fiveHour} label="Claude plan, five-hour window" />
+                    </div>
+                  )}
+                  {sevenDay != null && (
+                    <div>
+                      <p className="mb-1.5 flex justify-between text-xs text-text-3"><span>Plan, 7 days</span><span className="tnum font-semibold text-text-2">{Math.round(sevenDay)}%</span></p>
+                      <Meter value={sevenDay} label="Claude plan, seven-day window" />
+                    </div>
+                  )}
+                </div>
+              )}
+              {k === "credit" && u && (
+                <p className="mt-2 text-sm text-text-3">{cents(Number(u.credit_usd))} of credit used</p>
+              )}
+              {k === "openrouter" && u && (
+                <p className="mt-2 text-sm text-text-3">{cents(Number(u.cost))} billed</p>
               )}
             </li>
           );
@@ -512,3 +338,58 @@ function LaneRouting() {
     </Panel>
   );
 }
+
+function ProjectsTable({ o }: { o?: Overview }) {
+  const rows = o?.top_projects ?? [];
+  return (
+    <Panel className="reveal" style={{ ["--d" as string]: "340ms" }}>
+      <PanelHead
+        title="Projects"
+        meta="Busiest first"
+        action={<Link href="/projects" className="text-sm font-semibold text-text-2 underline-offset-4 hover:text-text hover:underline">All projects</Link>}
+      />
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[36rem] text-left">
+          <thead>
+            <tr className="border-y border-hair text-sm text-text-3">
+              <th className="px-6 py-2.5 font-semibold">Project</th>
+              <th className="px-3 py-2.5 font-semibold">Trend</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Requests</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Credit</th>
+              <th className="px-6 py-2.5 text-right font-semibold">Billed</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-hair">
+            {!o
+              ? Array.from({ length: 4 }).map((_, i) => (
+                  <tr key={i}><td colSpan={5} className="px-6 py-3"><Pulse className="h-6 w-full" /></td></tr>
+                ))
+              : rows.length === 0
+                ? <tr><td colSpan={5} className="px-6 py-10 text-center text-base text-text-3">No traffic in this window.</td></tr>
+                : rows.map((p) => {
+                    const lane = laneOf("paid", p.top_lane);
+                    return (
+                      <tr key={p.project_id} className="group transition-colors hover:bg-raised/60">
+                        <td className="px-6 py-3">
+                          <Link href={`/projects/${p.project_id}`} className="flex items-center gap-3">
+                            <LaneDot scope={lane.scope} />
+                            <span className="min-w-0">
+                              <span className="block truncate text-base font-semibold text-text group-hover:underline">{p.name}</span>
+                              <span className="block text-sm text-text-3">Mostly {lane.label.toLowerCase()}, {ms(p.avg_response_ms)} average</span>
+                            </span>
+                          </Link>
+                        </td>
+                        <td className="w-32 px-3 py-3"><Sparkline values={p.daily ?? []} height={28} /></td>
+                        <td className="tnum px-3 py-3 text-right text-base font-semibold text-text">{count(p.requests)}</td>
+                        <td className="tnum px-3 py-3 text-right text-base text-text-2">{money(Number(p.credit_usd ?? 0))}</td>
+                        <td className="tnum px-6 py-3 text-right text-base text-text-2">{money(Number(p.cost))}</td>
+                      </tr>
+                    );
+                  })}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+

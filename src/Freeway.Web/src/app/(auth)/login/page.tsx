@@ -47,7 +47,7 @@ export default function LoginPage() {
           </span>
 
           <h1 className="mt-8 text-4xl font-semibold tracking-tight text-text">Freeway</h1>
-          <p className="mt-2 text-sm text-text-2">
+          <p className="mt-2 text-base text-text-2">
             Telemetry and routing for your gateway.
           </p>
 
@@ -90,7 +90,7 @@ export default function LoginPage() {
                 className="flex items-start gap-2.5 rounded border border-bad/30 bg-bad/[0.07] px-3.5 py-2.5"
               >
                 <CircleAlert className="mt-px h-4 w-4 shrink-0 text-bad" aria-hidden />
-                <p className="text-sm text-bad">{error}</p>
+                <p className="text-base text-bad">{error}</p>
               </div>
             )}
 
@@ -105,11 +105,11 @@ export default function LoginPage() {
       <aside className="relative hidden items-center overflow-hidden border-l border-hair bg-panel px-12 lg:flex">
         <div className="ticks absolute inset-x-0 top-0 h-px opacity-50" aria-hidden />
         <div className="w-full max-w-md">
-          <p className="text-2xs font-medium uppercase text-text-3">The routing table</p>
+          <p className="text-base font-semibold text-text-3">The routing table</p>
           <h2 className="mt-3 text-2xl font-semibold tracking-tight text-text">
             Ask for a lane, not a model
           </h2>
-          <p className="mt-2 text-sm leading-relaxed text-text-2">
+          <p className="mt-2 text-base leading-relaxed text-text-2">
             Freeway picks the provider, steps around whichever one is throttling, and records what
             every request actually cost.
           </p>
@@ -129,7 +129,7 @@ export default function LoginPage() {
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded lane-soft lane-fg">
                     <lane.icon className="h-3.5 w-3.5" aria-hidden />
                   </span>
-                  <code className="font-mono text-sm text-text">{lane.model}</code>
+                  <code className="font-mono text-base text-text">{lane.model}</code>
                   <span
                     className="ml-auto h-1 rounded-full lane-bg"
                     style={{ width: `${96 - i * 16}px` }}
@@ -140,7 +140,7 @@ export default function LoginPage() {
             })}
           </ul>
 
-          <p className="mt-5 text-xs text-text-3">
+          <p className="mt-5 text-sm text-text-3">
             Lane colour tracks cost, from free through to premium.
           </p>
         </div>

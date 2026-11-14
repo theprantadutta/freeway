@@ -3,81 +3,80 @@
 @tailwind utilities;
 
 /*
-  Freeway — telemetry console.
+  Freeway — a highway at night.
 
-  Two rules hold the whole thing together.
+  Requests are traffic: they arrive from apps, take a lane, and leave through
+  whichever route answered them. The console is drawn the way that road looks after
+  dark. A midnight-navy surface, ink for structure, and the five lanes lit in their
+  own colours. Overpass, the face derived from the US highway-sign alphabet, carries
+  every word and number.
 
-  Structure is achromatic and dark-first. The console is a black field with panels
-  lifted out of it by a hairline, never a white card floating on grey.
-
-  Hue means one thing only: which lane a request took. Free green, then the paid
-  tiers climb low blue → moderate amber → premium rose as a cost ladder, with image
-  set apart in violet because it is a different kind of work rather than a step on
-  that ladder. Nothing else in the interface is allowed to be coloured.
+  Hue means one thing only: which lane a request took. Free, then the paid tiers
+  low, moderate and premium, with image apart. The five lane colours are a validated
+  categorical set (colour-blind safe in this order, in both themes). Text never wears
+  a lane colour; a dot, stripe or bar beside it carries the identity.
 */
 
 :root {
   /* Dark is the default: this is a screen people leave open. */
-  --base: 7 9 13;
-  --panel: 14 17 22;
-  --raised: 20 25 33;
-  --sunken: 10 13 18;
-  --hair: 30 36 46;
-  --hair-bright: 46 54 68;
+  --base: 11 19 36;
+  --panel: 16 26 48;
+  --raised: 23 35 62;
+  --sunken: 13 22 41;
+  --hair: 30 43 71;
+  --hair-bright: 45 61 96;
 
-  /* Menus and popovers. A step above --raised on purpose: rows use --raised on
-     hover, and a menu the same colour as the row it opens over reads as a pane of
-     glass rather than a menu. The shadow does the rest of the work. */
-  --overlay: 30 37 48;
-  --overlay-shadow: 0 0 0 1px rgb(0 0 0 / 0.5), 0 10px 30px -6px rgb(0 0 0 / 0.7);
+  --overlay: 27 40 70;
+  --overlay-shadow: 0 0 0 1px rgb(0 0 0 / 0.45), 0 18px 40px -10px rgb(0 0 0 / 0.75);
+  --card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.25);
 
-  --text: 233 238 245;
-  --text-2: 150 160 176;
-  --text-3: 99 109 125;
+  --text: 234 240 250;
+  --text-2: 166 179 204;
+  --text-3: 112 126 155;
 
-  --accent: 99 102 241;
+  /* The interface accent is ink, not a hue: every hue is already spoken for. */
+  --accent: 234 240 250;
 
-  --free: 16 185 129;
-  --low: 56 189 248;
-  --moderate: 251 176 64;
-  --premium: 244 87 116;
-  --image: 167 139 250;
+  --free: 25 158 112;
+  --low: 57 135 229;
+  --moderate: 201 133 0;
+  --premium: 213 81 129;
+  --image: 144 133 233;
 
-  --ok: 16 185 129;
-  --warn: 251 176 64;
-  --bad: 244 87 116;
+  --ok: 12 163 12;
+  --warn: 250 178 25;
+  --bad: 208 59 59;
 
   color-scheme: dark;
 }
 
 :root.light {
-  --base: 250 250 252;
+  --base: 243 245 249;
   --panel: 255 255 255;
   --raised: 255 255 255;
-  --sunken: 244 245 248;
-  --hair: 226 229 236;
-  --hair-bright: 203 208 219;
+  --sunken: 237 240 246;
+  --hair: 225 230 239;
+  --hair-bright: 203 211 225;
 
-  /* Light has nowhere brighter to go -- panel and raised are both white -- so here
-     the shadow is what separates a menu from the page, not the fill. */
   --overlay: 255 255 255;
-  --overlay-shadow: 0 0 0 1px rgb(15 20 30 / 0.08), 0 12px 28px -8px rgb(15 20 30 / 0.25);
+  --overlay-shadow: 0 0 0 1px rgb(15 23 41 / 0.08), 0 16px 32px -10px rgb(15 23 41 / 0.28);
+  --card-shadow: 0 1px 2px rgb(15 23 41 / 0.05), 0 1px 0 rgb(15 23 41 / 0.03);
 
-  --text: 12 15 22;
-  --text-2: 86 95 111;
-  --text-3: 132 141 157;
+  --text: 15 23 41;
+  --text-2: 74 86 114;
+  --text-3: 115 127 152;
 
-  --accent: 79 70 229;
+  --accent: 15 23 41;
 
-  --free: 5 150 105;
-  --low: 2 132 199;
-  --moderate: 202 106 6;
-  --premium: 225 29 72;
-  --image: 124 58 237;
+  --free: 27 175 122;
+  --low: 42 120 214;
+  --moderate: 237 161 0;
+  --premium: 232 123 164;
+  --image: 98 80 214;
 
-  --ok: 5 150 105;
-  --warn: 202 106 6;
-  --bad: 225 29 72;
+  --ok: 12 140 12;
+  --warn: 214 145 0;
+  --bad: 208 59 59;
 
   color-scheme: light;
 }
@@ -94,56 +93,30 @@
   body {
     background: rgb(var(--base));
     color: rgb(var(--text));
-    font-family: var(--font-display), system-ui, sans-serif;
+    font-family: var(--font-sans), system-ui, sans-serif;
     font-synthesis-weight: none;
+    font-feature-settings: "kern", "liga";
   }
 
   :focus-visible {
-    outline: 2px solid rgb(var(--accent));
+    outline: 2px solid rgb(var(--accent) / 0.85);
     outline-offset: 2px;
-    border-radius: 2px;
+    border-radius: 4px;
   }
 
   ::selection {
-    background: rgb(var(--accent) / 0.3);
+    background: rgb(var(--low) / 0.35);
   }
 }
 
 @layer components {
-  /*
-    Figures. Mono with tabular numerals, because a number in this interface is data
-    to be compared down a column rather than prose to be read along a line.
-  */
-  .fig {
-    font-family: var(--font-mono), ui-monospace, monospace;
-    font-variant-numeric: tabular-nums;
-    font-feature-settings: "tnum", "zero";
+  /* Columns of figures align; standalone figures keep their natural widths. */
+  .tnum {
+    font-variant-numeric: tabular-nums lining-nums;
   }
-
-  /* The one display size. Used for the figure a page is actually about. */
-  .fig-hero {
-    font-family: var(--font-mono), ui-monospace, monospace;
-    font-variant-numeric: tabular-nums;
-    font-feature-settings: "tnum", "zero";
-    font-weight: 600;
-    letter-spacing: -0.045em;
-    line-height: 0.92;
-  }
-
-  /*
-    Section markers. A hairline rule with the label sitting on it, so a section is
-    announced by structure rather than by yet another bold heading.
-  */
-  .rule {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-  .rule::after {
-    content: "";
-    flex: 1;
-    height: 1px;
-    background: rgb(var(--hair));
+  .num {
+    font-variant-numeric: proportional-nums lining-nums;
+    letter-spacing: -0.02em;
   }
 
   /* Lane scope. Set one of these and everything inside picks up the hue. */
@@ -155,43 +128,56 @@
   .lane-other { --lane: var(--text-3); }
   .lane-accent { --lane: var(--accent); }
 
+  /* For icons and marks only: text never wears a lane colour. */
   .lane-fg { color: rgb(var(--lane)); }
   .lane-bg { background-color: rgb(var(--lane)); }
   .lane-soft { background-color: rgb(var(--lane) / 0.12); }
-  .lane-edge { border-color: rgb(var(--lane) / 0.35); }
+  .lane-edge { border-color: rgb(var(--lane) / 0.4); }
 
-  /* A lane's colour as a glow behind a figure, used once per card at most. */
-  .lane-halo {
-    background-image: radial-gradient(
-      120% 100% at 0% 0%,
-      rgb(var(--lane) / 0.14),
-      transparent 60%
-    );
+  /*
+    Card. A panel lifted off the road surface by a hairline and a faint top light,
+    the way a sign catches headlights. One radius for cards; tighter ones for things
+    inside them, so the hierarchy is visible in the corners too.
+  */
+  .card {
+    background: rgb(var(--panel));
+    border: 1px solid rgb(var(--hair));
+    border-radius: 1rem;
+    box-shadow: var(--card-shadow);
   }
 
   /*
-    Panel. A hairline box lifted out of the field. No shadow: shadows imply paper,
-    and this is a screen showing live numbers.
+    Lane stripe: the five lanes as a short run of road markings. Used to mark where
+    you are (the active navigation item) and nowhere decorative.
   */
-  .panel {
-    background: rgb(var(--panel));
-    border: 1px solid rgb(var(--hair));
-    border-radius: 0.75rem;
-  }
-
-  .panel-flush {
-    background: rgb(var(--panel));
-    border-top: 1px solid rgb(var(--hair));
-    border-bottom: 1px solid rgb(var(--hair));
-  }
-
-  /* Ticks along the top of the console, a nod to a signal readout. */
-  .ticks {
-    background-image: repeating-linear-gradient(
-      to right,
-      rgb(var(--hair-bright)) 0 1px,
-      transparent 1px 7px
+  .stripe {
+    background-image: linear-gradient(
+      to bottom,
+      rgb(var(--free)) 0 20%,
+      rgb(var(--low)) 20% 40%,
+      rgb(var(--moderate)) 40% 60%,
+      rgb(var(--premium)) 60% 80%,
+      rgb(var(--image)) 80% 100%
     );
+  }
+
+  /* A row that just arrived in a live list glows briefly, then settles. */
+  .arrive {
+    animation: arrive 1600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Status dot that breathes, for things that are live right now. */
+  .live-dot {
+    position: relative;
+  }
+  .live-dot::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 9999px;
+    background: currentColor;
+    opacity: 0.35;
+    animation: breathe 2.4s ease-out infinite;
   }
 }
 
@@ -228,48 +214,101 @@
   background: linear-gradient(90deg, transparent, rgb(var(--hair) / 0.9), transparent);
   animation: sweep 1.5s infinite;
 }
+
+/*
+  The page-load sequence. Elements opt in with `reveal` and a --d delay, so one page
+  plays one orchestrated entrance rather than every section bouncing on its own.
+*/
+.reveal {
+  animation: lift 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--d, 0ms);
+}
+
+/* Chart marks that draw themselves once. */
+.draw {
+  stroke-dasharray: var(--len, 2000);
+  stroke-dashoffset: var(--len, 2000);
+  animation: draw 1300ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+  animation-delay: var(--d, 0ms);
+}
+.grow-y {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: grow-y 760ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--d, 0ms);
+}
+.grow-x {
+  transform-origin: 0 50%;
+  animation: grow-x 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--d, 0ms);
+}
+
 @keyframes sweep {
   to {
     transform: translateX(100%);
   }
 }
-
-/*
-  One orchestrated entrance per page, and nothing else moves on its own. Motion that
-  answers a click is welcome; motion that happens at you is not.
-*/
-.enter > * {
-  animation: lift 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.enter > *:nth-child(1) { animation-delay: 0ms; }
-.enter > *:nth-child(2) { animation-delay: 50ms; }
-.enter > *:nth-child(3) { animation-delay: 100ms; }
-.enter > *:nth-child(4) { animation-delay: 150ms; }
-.enter > *:nth-child(5) { animation-delay: 200ms; }
-.enter > *:nth-child(6) { animation-delay: 250ms; }
-
 @keyframes lift {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
     transform: none;
   }
 }
-
-/* The series chart draws itself in, once. */
-@keyframes trace {
-  from {
-    clip-path: inset(0 100% 0 0);
-  }
+@keyframes draw {
   to {
-    clip-path: inset(0 0 0 0);
+    stroke-dashoffset: 0;
   }
 }
-.trace {
-  animation: trace 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes arrive {
+  0% {
+    background-color: rgb(var(--low) / 0.18);
+    transform: translateY(-6px);
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@keyframes breathe {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.45;
+  }
+  80%,
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+/* Traffic on the map: dashes travelling along a ribbon. */
+@keyframes flow {
+  to {
+    stroke-dashoffset: -64;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -277,8 +316,12 @@
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  .draw {
+    stroke-dashoffset: 0;
   }
 }

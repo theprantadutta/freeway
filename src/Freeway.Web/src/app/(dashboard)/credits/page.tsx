@@ -11,7 +11,8 @@ import { Failed, Empty } from "@/components/ui/state";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { useToast } from "@/components/ui/toast";
-import { SeriesChart } from "@/components/chart/series-chart";
+import { CreditBurn } from "@/components/charts/credit-burn";
+import { Ring } from "@/components/charts/primitives";
 import { creditsApi } from "@/lib/api/credits";
 import { laneOf } from "@/lib/theme/lanes";
 import { cn } from "@/lib/utils/cn";
@@ -82,16 +83,13 @@ export default function CreditsPage() {
           <section className="enter grid gap-4 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
             <Balance c={c} />
             <Panel className="flex min-h-[20rem] flex-col">
-              <SeriesChart
-                className="flex-1 pb-4"
-                points={c.series.map((d) => ({
-                  date: d.date,
-                  requests: d.requests,
-                  failures: 0,
-                  cost: d.credit_usd,
-                  tokens: d.tokens,
-                }))}
-              />
+              <div className="px-6 pt-6">
+                <h2 className="text-lg font-bold text-text">Spent this cycle</h2>
+                <p className="mt-0.5 text-base text-text-3">Adding up day by day, with where the current pace ends by the reset</p>
+              </div>
+              <div className="mt-2 flex-1">
+                <CreditBurn c={c} />
+              </div>
             </Panel>
           </section>
 
@@ -136,13 +134,13 @@ function Balance({ c }: { c: CreditOverview }) {
     <Panel className="lane-premium lane-halo flex flex-col justify-between p-5">
       <div>
         <div className="flex items-center justify-between gap-3">
-          <p className="text-2xs font-medium uppercase text-text-3">Left this cycle</p>
+          <p className="text-base font-semibold text-text-3">Left this cycle</p>
           <Tag tone={state.tone} dot>
             {state.label}
           </Tag>
         </div>
-        <p className="fig-hero mt-3 text-5xl text-text">{money(c.remaining_usd)}</p>
-        <p className="mt-1 text-sm text-text-2">
+        <p className="num mt-3 text-5xl font-extrabold text-text">{money(c.remaining_usd)}</p>
+        <p className="mt-1 text-base text-text-2">
           {money(c.used_usd)} of {money(grant?.amount_usd ?? 0)} used
           {grant && <> · resets {fullDate(grant.expires_at)}</>}
         </p>
@@ -158,12 +156,12 @@ function Balance({ c }: { c: CreditOverview }) {
           />
           <span className="absolute inset-y-0 w-px bg-text-2" style={{ left: `${c.stop_at_percent}%` }} />
         </div>
-        <p className="mt-1.5 text-2xs text-text-3">
+        <p className="mt-1.5 text-xs text-text-3">
           {pct(c.used_percent, 2)} used · stops at {pct(c.stop_at_percent)} ({money(c.usable_usd)})
         </p>
 
         {(c.state === "blocked" || c.state === "no_grant") && (
-          <p className="mt-3 rounded border border-bad/30 bg-bad/[0.07] px-3 py-2 text-xs text-text-2">
+          <p className="mt-3 rounded border border-bad/30 bg-bad/[0.07] px-3 py-2 text-sm text-text-2">
             {c.summary}
           </p>
         )}
@@ -210,22 +208,22 @@ function Chain({ c }: { c: CreditOverview }) {
       <ol className="divide-y divide-hair">
         {steps.map((s, i) => (
           <li key={s.name} className="flex items-start gap-3 px-4 py-3">
-            <span className="fig grid h-6 w-6 shrink-0 place-items-center rounded bg-sunken text-2xs text-text-2">
+            <span className="tnum grid h-6 w-6 shrink-0 place-items-center rounded bg-sunken text-xs text-text-2">
               {i + 1}
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-medium text-text">{s.name}</span>
+                <span className="text-base font-medium text-text">{s.name}</span>
                 {s.tag}
               </div>
-              <p className="mt-0.5 text-xs text-text-3">{s.detail}</p>
+              <p className="mt-0.5 text-sm text-text-3">{s.detail}</p>
             </div>
             {i < steps.length - 1 && <ArrowRight className="mt-1 h-3.5 w-3.5 shrink-0 text-text-3" aria-hidden />}
           </li>
         ))}
       </ol>
       {c.last_error && (
-        <p className="border-t border-hair px-4 py-3 text-xs text-text-3">
+        <p className="border-t border-hair px-4 py-3 text-sm text-text-3">
           Last problem{c.last_error_at ? ` (${ago(c.last_error_at)})` : ""}:{" "}
           <span className="text-text-2">{c.last_error.split("\n")[0]}</span>
         </p>
@@ -278,7 +276,7 @@ function KeyPanel({ c }: { c: CreditOverview }) {
       />
       {!key ? (
         <PanelBody>
-          <p className="text-sm text-text-2">Not seen yet. It is recorded on the first count after startup.</p>
+          <p className="text-base text-text-2">Not seen yet. It is recorded on the first count after startup.</p>
         </PanelBody>
       ) : (
         <>
@@ -344,7 +342,7 @@ function Breakdown({
     <Panel>
       <PanelHead title={title} meta="Share of the credit spent" />
       {rows.length === 0 ? (
-        <p className="px-4 py-6 text-sm text-text-3">Nothing yet this cycle.</p>
+        <p className="px-4 py-6 text-base text-text-3">Nothing yet this cycle.</p>
       ) : (
         <ul className="divide-y divide-hair">
           {rows.map((r) => {
@@ -353,10 +351,10 @@ function Breakdown({
             return (
               <li key={r.key + (r.tier ?? "")} className={cn(models && lane.scope, "px-4 py-2.5")}>
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className={cn("truncate text-xs text-text", models && "font-mono")}>
+                  <span className={cn("truncate text-sm text-text", models && "font-mono")}>
                     {models ? modelShortName(r.name) : r.name}
                   </span>
-                  <span className="fig shrink-0 text-xs text-text-2">{money(r.credit_usd)}</span>
+                  <span className="tnum shrink-0 text-sm text-text-2">{money(r.credit_usd)}</span>
                 </div>
                 <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-sunken">
                   <div
@@ -364,9 +362,9 @@ function Breakdown({
                     style={{ width: `${Math.max(share, 2)}%` }}
                   />
                 </div>
-                <div className="mt-1 flex items-center justify-between text-2xs text-text-3">
+                <div className="mt-1 flex items-center justify-between text-xs text-text-3">
                   <span>{models && r.tier ? lane.label : `${count(r.requests)} requests`}</span>
-                  <span className="fig">
+                  <span className="tnum">
                     {models ? `${count(r.requests)} req · ` : ""}
                     {compact(r.tokens)} tokens
                   </span>
@@ -384,15 +382,15 @@ function Recent({ c }: { c: CreditOverview }) {
   if (c.recent.length === 0) {
     return (
       <Panel>
-        <p className="px-4 py-6 text-sm text-text-3">No request has used the credit this cycle yet.</p>
+        <p className="px-4 py-6 text-base text-text-3">No request has used the credit this cycle yet.</p>
       </Panel>
     );
   }
 
   return (
     <Panel className="overflow-x-auto">
-      <table className="w-full min-w-[40rem] text-left text-xs">
-        <thead className="border-b border-hair text-2xs uppercase text-text-3">
+      <table className="w-full min-w-[40rem] text-left text-sm">
+        <thead className="border-b border-hair text-base text-text-3">
           <tr>
             <th className="px-4 py-2 font-medium">When</th>
             <th className="px-4 py-2 font-medium">Project</th>
@@ -411,13 +409,13 @@ function Recent({ c }: { c: CreditOverview }) {
                 <td className="max-w-[10rem] truncate px-4 py-2 text-text">{r.project_name}</td>
                 <td className="whitespace-nowrap px-4 py-2">
                   <span className="font-mono lane-fg">{modelShortName(r.model_id)}</span>
-                  {r.streamed && <span className="ml-1.5 text-2xs text-text-3">stream</span>}
+                  {r.streamed && <span className="ml-1.5 text-xs text-text-3">stream</span>}
                 </td>
-                <td className="fig whitespace-nowrap px-4 py-2 text-right text-text-2">
+                <td className="tnum whitespace-nowrap px-4 py-2 text-right text-text-2">
                   {compact(r.input_tokens)} → {compact(r.output_tokens)}
                 </td>
-                <td className="fig whitespace-nowrap px-4 py-2 text-right text-text-2">{ms(r.response_time_ms)}</td>
-                <td className="fig whitespace-nowrap px-4 py-2 text-right text-text">{money(r.credit_usd)}</td>
+                <td className="tnum whitespace-nowrap px-4 py-2 text-right text-text-2">{ms(r.response_time_ms)}</td>
+                <td className="tnum whitespace-nowrap px-4 py-2 text-right text-text">{money(r.credit_usd)}</td>
               </tr>
             );
           })}
@@ -473,7 +471,7 @@ function GrantEditor({ c }: { c: CreditOverview }) {
         <Field label="Starts" type="datetime-local" value={starts} onChange={(e) => setStarts(e.target.value)} />
         <Field label="Expires" type="datetime-local" value={expires} onChange={(e) => setExpires(e.target.value)} />
         <div className="flex items-center justify-between gap-3 sm:col-span-3">
-          <p className="text-xs text-text-3">
+          <p className="text-sm text-text-3">
             Match the Console&apos;s Billing page. The next cycle opens where this one ends.
           </p>
           <Button type="submit" busy={save.isPending}>
@@ -490,7 +488,7 @@ function History({ c }: { c: CreditOverview }) {
     <Panel>
       <PanelHead title="Past and current cycles" />
       {c.history.length === 0 ? (
-        <p className="px-4 py-6 text-sm text-text-3">No cycles recorded yet.</p>
+        <p className="px-4 py-6 text-base text-text-3">No cycles recorded yet.</p>
       ) : (
         <ul className="divide-y divide-hair">
           {c.history.map((g) => {
@@ -499,7 +497,7 @@ function History({ c }: { c: CreditOverview }) {
             return (
               <li key={g.id} className="px-4 py-2.5">
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-xs text-text">
+                  <span className="text-sm text-text">
                     {fullDate(g.starts_at)} – {fullDate(g.expires_at)}
                     {current && (
                       <Tag tone="accent" className="ml-2">
@@ -507,14 +505,14 @@ function History({ c }: { c: CreditOverview }) {
                       </Tag>
                     )}
                   </span>
-                  <span className="fig shrink-0 text-xs text-text-2">
+                  <span className="tnum shrink-0 text-sm text-text-2">
                     {money(g.used_usd)} / {money(g.amount_usd)}
                   </span>
                 </div>
                 <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-sunken">
                   <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(Math.max(share, 1), 100)}%` }} />
                 </div>
-                <p className="mt-1 text-2xs text-text-3">
+                <p className="mt-1 text-xs text-text-3">
                   {count(g.requests)} requests · {pct(share, 1)} used
                 </p>
               </li>
@@ -529,8 +527,8 @@ function History({ c }: { c: CreditOverview }) {
 function Figure({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-2xs uppercase text-text-3">{label}</dt>
-      <dd className="fig mt-0.5 text-sm text-text">{value}</dd>
+      <dt className="text-base text-text-3">{label}</dt>
+      <dd className="tnum mt-0.5 text-base text-text">{value}</dd>
     </div>
   );
 }
@@ -551,8 +549,8 @@ function Row({
   return (
     <div className="flex items-center gap-3 px-4 py-2.5">
       <Icon className="h-3.5 w-3.5 shrink-0 text-text-3" aria-hidden />
-      <dt className="w-28 shrink-0 text-xs text-text-3">{label}</dt>
-      <dd className={cn("min-w-0 flex-1 truncate text-xs", tone === "bad" ? "text-bad" : "text-text", mono && "font-mono")}>
+      <dt className="w-28 shrink-0 text-sm text-text-3">{label}</dt>
+      <dd className={cn("min-w-0 flex-1 truncate text-sm", tone === "bad" ? "text-bad" : "text-text", mono && "font-mono")}>
         {value}
       </dd>
     </div>

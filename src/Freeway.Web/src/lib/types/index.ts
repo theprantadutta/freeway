@@ -175,6 +175,52 @@ export interface UsagePoint {
   failures: number;
   cost: number;
   tokens: number;
+  credit_usd?: number;
+  avoided_usd?: number;
+  /** Requests per lane that day. */
+  lanes?: Record<string, number>;
+  /** Requests per backend that day. */
+  backends?: Record<string, number>;
+}
+
+/** Who answered a request: the Claude credit, Claude Code, a free provider, or OpenRouter (billed). */
+export type BackendKey = "credit" | "bridge" | "free" | "openrouter" | "other";
+
+export interface WindowTotals {
+  from: string;
+  to: string;
+  requests: number;
+  failures: number;
+  tokens: number;
+  cost: number;
+  credit_usd: number;
+  avoided_usd: number;
+  unbilled: number;
+  streamed: number;
+  avg_response_ms: number;
+  p50_response_ms: number;
+  p95_response_ms: number;
+}
+
+export interface BackendUsage {
+  backend: BackendKey;
+  requests: number;
+  failures: number;
+  tokens: number;
+  cost: number;
+  credit_usd: number;
+  avoided_usd: number;
+  avg_response_ms: number;
+}
+
+export interface Flow {
+  project_id: string;
+  project_name: string;
+  lane: string;
+  backend: BackendKey;
+  requests: number;
+  tokens: number;
+  cost: number;
 }
 
 export interface LaneUsage {
@@ -191,6 +237,10 @@ export interface TopModel {
   requests: number;
   cost: number;
   tokens: number;
+  failures?: number;
+  avg_response_ms?: number;
+  credit_usd?: number;
+  backend?: BackendKey;
 }
 
 export interface TopProject {
@@ -199,6 +249,13 @@ export interface TopProject {
   requests: number;
   cost: number;
   is_active: boolean;
+  tokens?: number;
+  failures?: number;
+  credit_usd?: number;
+  avg_response_ms?: number;
+  top_lane?: string;
+  /** Requests per day, aligned with the overview series. */
+  daily?: number[];
 }
 
 export interface RecentRequest {
@@ -212,6 +269,16 @@ export interface RecentRequest {
   cost_usd: number;
   total_tokens: number;
   created_at: string;
+  project_id?: string;
+  provider?: string | null;
+  backend?: BackendKey;
+  cost_source?: string | null;
+  credit_cost_usd?: number | null;
+  avoided_cost_usd?: number | null;
+  streamed?: boolean;
+  input_tokens?: number;
+  output_tokens?: number;
+  error_message?: string | null;
 }
 
 export interface OverviewTotals {
@@ -229,6 +296,8 @@ export interface OverviewTotals {
   failures_this_month: number;
   success_rate_this_month: number;
   avg_response_ms_this_month: number;
+  credit_this_month?: number;
+  avoided_this_month?: number;
 }
 
 export interface Overview {
@@ -239,6 +308,52 @@ export interface Overview {
   top_projects: TopProject[];
   recent: RecentRequest[];
   days: number;
+  project_id?: string | null;
+  window: WindowTotals;
+  previous_window: WindowTotals;
+  backends: BackendUsage[];
+  flows: Flow[];
+}
+
+/** The Claude Code bridge, as the server last saw it. Cached; reading it makes no call. */
+export interface LocalClaudeStatus {
+  configured: boolean;
+  can_serve: boolean;
+  state: "unknown" | "available" | "ratelimited" | "unavailable" | string;
+  summary: string;
+  detail?: string | null;
+  latency_ms?: number | null;
+  model?: string | null;
+  checked_at?: string | null;
+  busy?: boolean;
+  budget?: {
+    limit: number;
+    used: number;
+    remaining: number;
+    spillover_limit: number;
+    used_percent: number;
+    per_call_estimate: number;
+  } | null;
+  plan?: {
+    status?: string | null;
+    utilization_percent?: number | null;
+    window?: string | null;
+    windows: Record<string, { utilization_percent: number; resets_at?: string | null }>;
+    seen_at?: string | null;
+    max_utilization_percent?: number | null;
+    spillover_max_utilization_percent?: number | null;
+  } | null;
+}
+
+export interface GatewayAlert {
+  key: string;
+  /** 0 info, 1 warning, 2 critical. */
+  severity: 0 | 1 | 2;
+  title: string;
+  detail: string;
+  action?: string | null;
+  observed?: number | null;
+  threshold?: number | null;
 }
 
 // Claude API credit — the plan's monthly allowance, spent before anything is billed.

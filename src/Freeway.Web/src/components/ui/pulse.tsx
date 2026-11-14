@@ -8,7 +8,7 @@ export function Pulse({
   className?: string;
   style?: CSSProperties;
 }) {
-  return <div className={cn("pulse rounded", className)} style={style} aria-hidden />;
+  return <span className={cn("pulse block rounded", className)} style={style} aria-hidden />;
 }
 
 export function PulseRows({ rows = 4, className }: { rows?: number; className?: string }) {

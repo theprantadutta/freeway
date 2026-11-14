@@ -145,9 +145,11 @@ public class AdminController : BaseApiController
     /// split, the leading models and projects, and the most recent requests.
     /// </summary>
     [HttpGet("analytics/overview")]
-    public async Task<ActionResult> GetOverview([FromQuery] int days = 30)
+    public async Task<ActionResult> GetOverview(
+        [FromQuery] int days = 30,
+        [FromQuery(Name = "project_id")] Guid? projectId = null)
     {
-        var result = await Mediator.Send(new GetOverviewQuery(days));
+        var result = await Mediator.Send(new GetOverviewQuery(days, projectId));
         return HandleResult(result);
     }
 

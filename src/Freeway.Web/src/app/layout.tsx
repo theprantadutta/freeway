@@ -1,23 +1,21 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Overpass, Overpass_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 
-// Space Grotesk carries the interface: it has real character at display sizes and
-// stays technical rather than friendly, which suits a console.
-const display = Space_Grotesk({
-  variable: "--font-display",
+// Overpass is an open descendant of Highway Gothic, the US road-sign alphabet. A
+// gateway named for a highway reads its numbers off the same signage: open, upright
+// figures that stay legible at a glance and at a distance.
+const sans = Overpass({
+  variable: "--font-sans",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
-// Every number and identifier is set in mono. In an ops console figures are data to
-// be compared down a column, not prose.
-const mono = JetBrains_Mono({
+// Only for things that are literally code: API keys and request snippets.
+const mono = Overpass_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
@@ -27,13 +25,13 @@ export const metadata: Metadata = {
   applicationName: "Freeway",
   // icon.svg, favicon.ico and apple-icon.png sit beside this file and are picked
   // up by convention; this only adds the mask icon older Safari asks for.
-  icons: { other: [{ rel: "mask-icon", url: "/icon-192.png", color: "#10B981" }] },
+  icons: { other: [{ rel: "mask-icon", url: "/icon-192.png", color: "#199E70" }] },
 };
 
 export const viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#07090D" },
-    { media: "(prefers-color-scheme: light)", color: "#FAFAFC" },
+    { media: "(prefers-color-scheme: dark)", color: "#0B1324" },
+    { media: "(prefers-color-scheme: light)", color: "#F3F5F9" },
   ],
 };
 
@@ -54,7 +52,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${display.variable} ${mono.variable} antialiased`}>
+      <body className={`${sans.variable} ${mono.variable} antialiased`}>
         <Providers>{children}</Providers>
       </body>
     </html>

@@ -7,28 +7,39 @@ interface TagProps extends HTMLAttributes<HTMLSpanElement> {
   mono?: boolean;
 }
 
-/** Small status carrier. Colour here always means something. */
+/**
+ * Small status carrier. The text is always ink; colour sits in the dot and the wash,
+ * so a tag is readable whatever it is tinted with.
+ */
 export function Tag({ tone = "neutral", dot, mono, className, children, ...props }: TagProps) {
   const tones = {
     neutral: "bg-sunken text-text-2 border-hair",
-    lane: "lane-soft lane-fg lane-edge",
-    ok: "bg-ok/12 text-ok border-ok/25",
-    warn: "bg-warn/12 text-warn border-warn/25",
-    bad: "bg-bad/12 text-bad border-bad/25",
-    accent: "bg-accent/12 text-accent border-accent/25",
+    lane: "lane-soft text-text lane-edge",
+    ok: "bg-ok/12 text-text border-ok/30",
+    warn: "bg-warn/12 text-text border-warn/35",
+    bad: "bg-bad/12 text-text border-bad/35",
+    accent: "bg-text/[0.07] text-text border-hair-bright",
+  };
+  const dots = {
+    neutral: "bg-text-3",
+    lane: "lane-bg",
+    ok: "bg-ok",
+    warn: "bg-warn",
+    bad: "bg-bad",
+    accent: "bg-text",
   };
 
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-2xs font-medium",
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold",
         tones[tone],
-        mono && "font-mono tracking-normal",
+        mono && "font-mono font-medium",
         className
       )}
       {...props}
     >
-      {dot && <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />}
+      {dot && <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dots[tone])} aria-hidden />}
       {children}
     </span>
   );

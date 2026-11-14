@@ -28,6 +28,16 @@ export function money(n: number | undefined | null): string {
   return `$${compact(n)}`;
 }
 
+/**
+ * Money for a headline or a tile: cents once a figure reaches a cent, full precision
+ * only below it, so $0.4753 reads as $0.48 while $0.000259 still shows.
+ */
+export function cents(n: number | undefined | null): string {
+  if (n == null || n === 0) return "$0.00";
+  if (Math.abs(n) < 0.01) return money(n);
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 /** Per-million-token price, the unit model catalogs quote. */
 export function perMillion(pricePerToken: string | number | undefined | null): string {
   const v = typeof pricePerToken === "string" ? parseFloat(pricePerToken) : pricePerToken;

@@ -16,16 +16,13 @@ const Field = forwardRef<HTMLInputElement, FieldProps>(
     return (
       <div className="w-full">
         {label && (
-          <label
-            htmlFor={fieldId}
-            className="mb-1.5 block text-2xs font-medium uppercase text-text-3"
-          >
+          <label htmlFor={fieldId} className="mb-2 block text-sm font-semibold text-text-2">
             {label}
           </label>
         )}
         <div className="relative">
           {lead && (
-            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-3">
+            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-text-3">
               {lead}
             </span>
           )}
@@ -35,13 +32,13 @@ const Field = forwardRef<HTMLInputElement, FieldProps>(
             aria-invalid={error ? true : undefined}
             aria-describedby={describedBy}
             className={cn(
-              "h-9 w-full rounded border border-hair-bright bg-sunken px-3 text-sm text-text",
+              "h-11 w-full rounded-[0.625rem] border border-hair-bright bg-sunken px-3.5 text-base text-text",
               "placeholder:text-text-3",
-              "transition-[border-color,background-color] duration-150 ease-out",
+              "transition-[border-color,background-color,box-shadow] duration-150 ease-out",
               "hover:border-text-3/60",
-              "focus:border-accent focus:bg-panel focus:outline-none",
+              "focus:border-text-2 focus:bg-panel focus:shadow-[0_0_0_4px_rgb(var(--text)/0.06)] focus:outline-none",
               "disabled:opacity-50",
-              lead && "pl-8",
+              lead && "pl-10",
               error && "border-bad focus:border-bad",
               className
             )}
@@ -49,11 +46,11 @@ const Field = forwardRef<HTMLInputElement, FieldProps>(
           />
         </div>
         {error ? (
-          <p id={`${fieldId}-err`} className="mt-1.5 text-xs text-bad">
+          <p id={`${fieldId}-err`} className="mt-2 text-sm text-bad">
             {error}
           </p>
         ) : hint ? (
-          <p id={`${fieldId}-hint`} className="mt-1.5 text-xs text-text-3">
+          <p id={`${fieldId}-hint`} className="mt-2 text-sm text-text-3">
             {hint}
           </p>
         ) : null}

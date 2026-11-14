@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { PageHead } from "@/components/shell/page-head";
 import { Panel } from "@/components/ui/panel";
+import { LaneDot, Sparkline } from "@/components/charts/primitives";
 import { Menu, MenuItem } from "@/components/ui/menu";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
@@ -28,9 +29,9 @@ import { useToast } from "@/components/ui/toast";
 import { projectsApi } from "@/lib/api/projects";
 import { analyticsApi } from "@/lib/api/analytics";
 import { cn } from "@/lib/utils/cn";
-import { compact, fullDate, money, pct, startOfMonthIso } from "@/lib/utils/format";
-import { LANES, laneOf, type Lane } from "@/lib/theme/lanes";
-import type { ModelUsageStats, Project } from "@/lib/types";
+import { cents, count, fullDate, ms } from "@/lib/utils/format";
+import { laneOf } from "@/lib/theme/lanes";
+import type { Project, TopProject } from "@/lib/types";
 
 export default function ProjectsPage() {
   const qc = useQueryClient();
@@ -43,6 +44,9 @@ export default function ProjectsPage() {
   const [freshKey, setFreshKey] = useState<string | null>(null);
 
   const list = useQuery({ queryKey: ["projects"], queryFn: () => projectsApi.getProjects() });
+  // One call gives every project its 30-day figures and trend.
+  const overview = useQuery({ queryKey: ["overview", "30"], queryFn: () => analyticsApi.getOverview(30) });
+  const stats = new Map((overview.data?.top_projects ?? []).map((p) => [p.project_id, p]));
 
   const create = useMutation({
     mutationFn: projectsApi.createProject,
@@ -91,13 +95,13 @@ export default function ProjectsPage() {
   const activeCount = projects.filter((p) => p.is_active).length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <PageHead
         title="Projects"
-        lede="Each project carries its own API key, rate limit and spend history."
+        lede="Each app that calls Freeway is a project, with its own key, rate limit and history. Figures cover the last 30 days."
         actions={
           <Button variant="solid" onClick={() => setCreating(true)}>
-            <Plus className="h-3.5 w-3.5" aria-hidden />
+            <Plus className="h-4 w-4" aria-hidden />
             New project
           </Button>
         }
@@ -108,11 +112,11 @@ export default function ProjectsPage() {
       ) : (
         <>
           {list.isLoading ? (
-            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <ul className="grid gap-5 sm:grid-cols-2 2xl:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
                 <li
                   key={i}
-                  className="h-[13.5rem] rounded-panel border border-hair bg-panel p-4"
+                  className="card h-[17rem] p-6"
                 >
                   <Pulse className="h-4 w-1/2" />
                   <Pulse className="mt-3 h-3 w-2/3" />
@@ -130,7 +134,7 @@ export default function ProjectsPage() {
                 body="A project gets its own key, its own limit and its own line in every report. Create one to start sending requests."
                 action={
                   <Button variant="solid" onClick={() => setCreating(true)}>
-                    <Plus className="h-3.5 w-3.5" aria-hidden />
+                    <Plus className="h-4 w-4" aria-hidden />
                     New project
                   </Button>
                 }
@@ -138,14 +142,19 @@ export default function ProjectsPage() {
             </Panel>
           ) : (
             <>
-              <p className="mb-3 text-2xs font-medium uppercase tracking-wide text-text-3">
+              <p className="reveal mb-4 text-base text-text-3">
                 {activeCount} of {projects.length} accepting requests
               </p>
-              <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {projects.map((p) => (
+              <ul className="grid gap-5 sm:grid-cols-2 2xl:grid-cols-3">
+                {[...projects]
+                  .sort((a, b) => (stats.get(b.id)?.requests ?? 0) - (stats.get(a.id)?.requests ?? 0))
+                  .map((p, i) => (
                   <ProjectCard
                     key={p.id}
+                    index={i}
                     project={p}
+                    stats={stats.get(p.id)}
+                    loading={overview.isLoading}
                     onEdit={() => setEditing(p)}
                     onRotate={() => setRotating(p)}
                     onDelete={() => setDeleting(p)}
@@ -211,82 +220,54 @@ export default function ProjectsPage() {
 }
 
 /**
- * One project, as a card.
- *
- * The thing people come to this page to compare is spend, so the month's figure is
- * the card's largest element and everything else is arranged around it. The rule
- * along the top takes the colour of the lane the project sends most of its traffic
- * to, which makes a wall of cards sortable by eye before a single number is read.
+ * One project, as a card. Requests lead, because they are what changes day to day;
+ * money sits below in its two kinds, credit and billed, and the trend along the
+ * bottom says whether the app is getting busier.
  */
 function ProjectCard({
   project,
+  stats,
+  loading,
+  index,
   onEdit,
   onRotate,
   onDelete,
 }: {
   project: Project;
+  stats?: TopProject;
+  loading: boolean;
+  index: number;
   onEdit: () => void;
   onRotate: () => void;
   onDelete: () => void;
 }) {
-  // Spend is what this page is scanned for, so each card fetches its own figures.
-  const month = useQuery({
-    queryKey: ["project-usage", project.id, "month"],
-    queryFn: () => analyticsApi.getProjectUsage(project.id, startOfMonthIso()),
-  });
-  const life = useQuery({
-    queryKey: ["project-usage", project.id, "all"],
-    queryFn: () => analyticsApi.getProjectUsage(project.id),
-  });
-
-  const loading = month.isLoading || life.isLoading;
-
-  // Split by requests rather than cost: a project living on the free lane spends
-  // nothing, and a bar of all zeros would say it had no traffic at all.
-  const split = laneSplit(life.data?.by_model ?? []);
-  const dominant = split[0]?.lane ?? LANES.other;
-
-  const monthCost = Number(month.data?.summary?.total_cost_usd ?? 0);
-  const monthReqs = month.data?.summary?.total_requests ?? 0;
-  const lifeCost = Number(life.data?.summary?.total_cost_usd ?? 0);
-  const success = life.data?.summary?.success_rate;
+  const lane = laneOf("paid", stats?.top_lane);
+  const success = stats && stats.requests ? ((stats.requests - (stats.failures ?? 0)) / stats.requests) * 100 : null;
 
   return (
     <li
       className={cn(
-        dominant.scope,
-        "group relative flex flex-col overflow-hidden rounded-panel border border-hair bg-panel",
-        "transition-colors duration-150 hover:border-hair-bright focus-within:border-hair-bright"
+        "card reveal group relative flex flex-col overflow-hidden",
+        "transition-[border-color,transform] duration-300 ease-out hover:-translate-y-0.5 hover:border-hair-bright focus-within:border-hair-bright"
       )}
+      style={{ ["--d" as string]: `${Math.min(index * 50, 400)}ms` }}
     >
-      {/* The lane rule. Thin and flat until the card is hovered, then it owns the edge. */}
-      <span
-        className="h-0.5 w-full lane-bg opacity-60 transition-opacity duration-150 group-hover:opacity-100"
-        aria-hidden
-      />
-
-      <div className="flex items-start gap-3 px-4 pt-3.5">
+      <div className="flex items-start gap-3 px-6 pt-6">
         <div className="min-w-0 flex-1">
           <Link href={`/projects/${project.id}`} className="rounded outline-none">
             <span className="absolute inset-0" aria-hidden />
-            {/* Fixed height: the `paused` tag is taller than bare text, and without
-                this it nudges the whole card down out of line with its neighbours. */}
-            <span className="flex h-5 items-center gap-2">
+            <span className="flex items-center gap-2.5">
               <span
-                className={cn(
-                  "h-1.5 w-1.5 shrink-0 rounded-full",
-                  project.is_active ? "bg-ok" : "bg-text-3/50"
-                )}
+                className={cn("h-2.5 w-2.5 shrink-0 rounded-full", project.is_active ? "bg-ok" : "bg-text-3/50")}
                 aria-hidden
               />
-              <span className="truncate text-sm font-semibold text-text">{project.name}</span>
+              <span className="truncate text-xl font-bold text-text group-hover:underline">{project.name}</span>
               {!project.is_active && <Tag>paused</Tag>}
             </span>
           </Link>
-          <p className="mt-1.5 flex items-center gap-2 text-xs text-text-3">
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-text-3">
             <code className="font-mono">{project.api_key_prefix}…</code>
-            <span aria-hidden>·</span>
-            <span className="fig">{project.rate_limit_per_minute}/min</span>
+            <span className="tnum">{project.rate_limit_per_minute} per minute</span>
           </p>
         </div>
 
@@ -295,65 +276,37 @@ function ProjectCard({
         </div>
       </div>
 
-      <div className="px-4 pt-4">
-        {loading ? (
-          <Pulse className="h-8 w-28" />
-        ) : (
-          <p className="fig text-2xl font-semibold leading-none tracking-tight text-text">
-            {money(monthCost)}
-          </p>
-        )}
-        <p className="mt-1.5 text-xs text-text-3">
-          {loading ? " " : `this month · ${compact(monthReqs)} requests`}
-        </p>
+      <div className="mt-6 grid grid-cols-3 gap-4 px-6">
+        <Figure label="Requests" value={loading ? null : count(stats?.requests ?? 0)} big />
+        <Figure label="Credit" value={loading ? null : cents(Number(stats?.credit_usd ?? 0))} />
+        <Figure label="Billed" value={loading ? null : cents(Number(stats?.cost ?? 0))} />
       </div>
 
-      <div className="mt-4 px-4">
+      <div className="mt-5 px-6">
         {loading ? (
-          <Pulse className="h-1.5 w-full rounded-full" />
-        ) : split.length === 0 ? (
-          <p className="text-xs text-text-3">No traffic yet</p>
+          <Pulse className="h-9 w-full" />
+        ) : stats ? (
+          <Sparkline values={stats.daily ?? []} height={36} emphasis />
         ) : (
+          <p className="py-2 text-sm text-text-3">No requests in the last 30 days</p>
+        )}
+      </div>
+
+      <div className="mt-auto flex items-center gap-4 border-t border-hair px-6 py-3.5 text-sm text-text-3">
+        {stats ? (
           <>
-            {/* Identity comes from the keyed list below, never from hue alone: the
-                card's click overlay sits above this bar, so it can carry no hover. */}
-            <div className="flex h-1.5 w-full gap-px overflow-hidden rounded-full" aria-hidden>
-              {split.map((s) => (
-                <span
-                  key={s.lane.key}
-                  className={cn(s.lane.scope, "h-full lane-bg")}
-                  style={{ width: `${s.share}%` }}
-                />
-              ))}
-            </div>
-            <ul className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-              {split.map((s) => (
-                <li key={s.lane.key} className={cn(s.lane.scope, "flex items-center gap-1.5")}>
-                  <span className="h-1.5 w-1.5 rounded-full lane-bg" aria-hidden />
-                  <span className="text-2xs text-text-3">
-                    {s.lane.label} {Math.round(s.share)}%
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <span className="flex items-center gap-2">
+              <LaneDot scope={lane.scope} className="h-2 w-2" />
+              Mostly {lane.label.toLowerCase()}
+            </span>
+            {success != null && <span className="tnum">{success.toFixed(1)}% ok</span>}
+            <span className="tnum hidden sm:inline">{ms(stats.avg_response_ms)}</span>
           </>
+        ) : (
+          <span>Since {fullDate(project.created_at)}</span>
         )}
-      </div>
-
-      <div className="mt-4 flex items-center gap-4 border-t border-hair px-4 py-2.5 text-2xs text-text-3">
-        <span>
-          all time <span className="fig text-text-2">{loading ? "—" : money(lifeCost)}</span>
-        </span>
-        {!loading && success != null && (
-          <span>
-            <span className="fig text-text-2">{pct(success, 1)}</span> ok
-          </span>
-        )}
-        <span className="ml-auto hidden truncate sm:block">
-          since {fullDate(project.created_at)}
-        </span>
         <ChevronRight
-          className="h-3.5 w-3.5 shrink-0 text-text-3 transition-transform duration-150 ease-out group-hover:translate-x-0.5"
+          className="ml-auto h-4 w-4 shrink-0 text-text-3 transition-transform duration-200 ease-out group-hover:translate-x-1"
           aria-hidden
         />
       </div>
@@ -361,24 +314,17 @@ function ProjectCard({
   );
 }
 
-/** Aggregates per-model rows onto lanes, largest share first. */
-function laneSplit(byModel: ModelUsageStats[]) {
-  const totals = new Map<string, { lane: Lane; requests: number }>();
-
-  for (const row of byModel) {
-    const lane = laneOf(row.model_type, row.model_tier);
-    const entry = totals.get(lane.key) ?? { lane, requests: 0 };
-    entry.requests += row.requests;
-    totals.set(lane.key, entry);
-  }
-
-  const all = [...totals.values()].filter((e) => e.requests > 0);
-  const total = all.reduce((sum, e) => sum + e.requests, 0);
-  if (total === 0) return [];
-
-  return all
-    .map((e) => ({ ...e, share: (e.requests / total) * 100 }))
-    .sort((a, b) => b.share - a.share);
+function Figure({ label, value, big }: { label: string; value: string | null; big?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-sm text-text-3">{label}</p>
+      {value == null ? (
+        <Pulse className="mt-1.5 h-7 w-16" />
+      ) : (
+        <p className={cn("num mt-1 truncate font-extrabold text-text", big ? "text-2xl" : "text-xl")}>{value}</p>
+      )}
+    </div>
+  );
 }
 
 function RowMenu({
@@ -396,7 +342,7 @@ function RowMenu({
     <Menu
       trigger={(props) => (
         <Button {...props} variant="ghost" size="icon" aria-label={`Actions for ${name}`}>
-          <MoreVertical className="h-4 w-4" aria-hidden />
+          <MoreVertical className="h-5 w-5" aria-hidden />
         </Button>
       )}
     >
@@ -511,10 +457,10 @@ function EditSheet({
           hint="Requests per minute."
         />
 
-        <div className="flex items-center justify-between gap-4 rounded border border-hair bg-sunken px-3.5 py-3">
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-hair bg-sunken px-4 py-3.5">
           <span>
-            <span className="block text-sm font-medium text-text">Accepting requests</span>
-            <span className="block text-xs text-text-3">
+            <span className="block text-base font-semibold text-text">Accepting requests</span>
+            <span className="block text-sm text-text-3">
               Pausing rejects this key without deleting anything.
             </span>
           </span>
@@ -566,15 +512,15 @@ function KeySheet({ apiKey, onClose }: { apiKey: string; onClose: () => void }) 
 
   return (
     <Sheet open onClose={onClose} title="Copy your API key" description="This is the only time it is shown.">
-      <div className="flex items-start gap-2.5 rounded border border-warn/30 bg-warn/[0.08] px-3.5 py-3">
-        <TriangleAlert className="mt-px h-4 w-4 shrink-0 text-warn" aria-hidden />
-        <p className="text-sm text-text">
+      <div className="flex items-start gap-3 rounded-xl border border-warn/30 bg-warn/[0.08] px-4 py-3.5">
+        <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-warn" aria-hidden />
+        <p className="text-base text-text">
           Freeway stores only a hash, so it cannot show you this again. Losing it means rotating.
         </p>
       </div>
 
-      <div className="mt-4 flex items-start gap-2 rounded border border-hair bg-sunken p-3">
-        <code className="flex-1 break-all font-mono text-xs text-text">{apiKey}</code>
+      <div className="mt-4 flex items-start gap-2 rounded-xl border border-hair bg-sunken p-3.5">
+        <code className="flex-1 break-all font-mono text-sm text-text">{apiKey}</code>
         <Button size="icon" onClick={copy} aria-label={copied ? "Copied" : "Copy API key"}>
           {copied ? <Check className="h-4 w-4 text-ok" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
         </Button>

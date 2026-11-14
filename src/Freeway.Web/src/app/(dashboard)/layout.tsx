@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/stores/auth-store";
-import { TopBar } from "@/components/shell/top-bar";
+import { MobileBar, Sidebar } from "@/components/shell/sidebar";
 import { ToastProvider } from "@/components/ui/toast";
 import { Mark } from "@/components/brand/mark";
 
@@ -27,8 +27,8 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
 
   if (!hydrated) {
     return (
-      <div className="grid min-h-screen place-items-center bg-base">
-        <span className="h-9 w-9 animate-pulse">
+      <div className="grid min-h-screen place-items-center bg-page">
+        <span className="h-10 w-10 animate-pulse">
           <Mark />
         </span>
       </div>
@@ -39,9 +39,14 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
 
   return (
     <ToastProvider>
-      <div className="min-h-screen bg-base">
-        <TopBar />
-        <main className="mx-auto max-w-[1600px] px-4 py-7 sm:px-6">{children}</main>
+      <div className="flex min-h-screen bg-page">
+        <Sidebar />
+        <div className="min-w-0 flex-1">
+          <MobileBar />
+          <main className="mx-auto w-full max-w-[1520px] px-4 pb-16 pt-8 sm:px-6 lg:px-10 lg:pt-10">
+            {children}
+          </main>
+        </div>
       </div>
     </ToastProvider>
   );

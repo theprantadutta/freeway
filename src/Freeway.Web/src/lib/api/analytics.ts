@@ -1,9 +1,23 @@
 import { api } from "./client";
-import type { GlobalSummary, Overview, ProjectUsage, UsageLogsResponse } from "@/lib/types";
+import type {
+  GatewayAlert,
+  GlobalSummary,
+  LocalClaudeStatus,
+  Overview,
+  ProjectUsage,
+  UsageLogsResponse,
+} from "@/lib/types";
 
 export const analyticsApi = {
-  /** Everything the dashboard needs in one call, including the daily series. */
-  getOverview: (days = 30) => api.get<Overview>(`/admin/analytics/overview?days=${days}`),
+  /**
+   * Everything the dashboard needs in one call, including the daily series, who
+   * answered, and the project → lane → backend flows. `projectId` limits every
+   * figure to one project.
+   */
+  getOverview: (days = 30, projectId?: string) =>
+    api.get<Overview>(
+      `/admin/analytics/overview?days=${days}${projectId ? `&project_id=${projectId}` : ""}`
+    ),
 
   // Global summary
   getGlobalSummary: () => api.get<GlobalSummary>("/admin/analytics/summary"),
@@ -41,4 +55,13 @@ export const analyticsApi = {
       `/admin/analytics/logs?${params.toString()}`
     );
   },
+
+  /** The Claude Code bridge's last known state and the Claude plan's usage. Makes no call upstream. */
+  getLocalClaude: () => api.get<LocalClaudeStatus>("/admin/local-claude"),
+
+  /** Probes the bridge now instead of waiting for the hourly check. */
+  checkLocalClaude: () => api.post<LocalClaudeStatus>("/admin/local-claude/check"),
+
+  /** Alerts firing right now (spend, credit, keys). Runs the checks, so call it sparingly. */
+  getAlerts: () => api.get<{ count: number; alerts: GatewayAlert[] }>("/admin/notifications/alerts"),
 };

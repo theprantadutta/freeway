@@ -28,7 +28,7 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-7">
-      <PageHead title="Settings" lede="Your account, this console, and what the colours mean." />
+      <PageHead title="Settings" lede="Your account, how the console looks, and what each colour means." />
 
       <section className="grid gap-4 lg:grid-cols-2">
         <Panel>
@@ -39,7 +39,7 @@ export default function SettingsPage() {
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="truncate text-sm font-semibold text-text">
+                <p className="truncate text-base font-semibold text-text">
                   {user?.name || user?.email?.split("@")[0]}
                 </p>
                 {user?.is_admin && (
@@ -49,17 +49,17 @@ export default function SettingsPage() {
                   </Tag>
                 )}
               </div>
-              <p className="truncate text-xs text-text-3">{user?.email}</p>
+              <p className="truncate text-sm text-text-3">{user?.email}</p>
               <dl className="mt-3 grid gap-3 sm:grid-cols-2">
                 <div>
-                  <dt className="text-2xs uppercase text-text-3">Member since</dt>
-                  <dd className="mt-0.5 text-xs text-text-2">
+                  <dt className="text-base text-text-3">Member since</dt>
+                  <dd className="mt-0.5 text-sm text-text-2">
                     {user?.created_at ? dateTime(user.created_at) : "—"}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-2xs uppercase text-text-3">Last signed in</dt>
-                  <dd className="mt-0.5 text-xs text-text-2">
+                  <dt className="text-base text-text-3">Last signed in</dt>
+                  <dd className="mt-0.5 text-sm text-text-2">
                     {user?.last_login_at ? dateTime(user.last_login_at) : "—"}
                   </dd>
                 </div>
@@ -104,12 +104,12 @@ export default function SettingsPage() {
                     )}
                   >
                     <o.icon className="h-4 w-4" aria-hidden />
-                    <span className="text-sm font-medium">{o.label}</span>
+                    <span className="text-base font-medium">{o.label}</span>
                   </button>
                 );
               })}
             </div>
-            <p className="mt-3 text-xs text-text-3">
+            <p className="mt-3 text-sm text-text-3">
               The console is designed dark first. Light is a separate set of values rather than an
               inversion of it.
             </p>
@@ -120,7 +120,7 @@ export default function SettingsPage() {
       <section>
         <Rule>Lane colours</Rule>
         <Panel>
-          <p className="border-b border-hair px-4 py-3 text-sm text-text-2">
+          <p className="border-b border-hair px-4 py-3 text-base text-text-2">
             A request type keeps its colour everywhere in the console. The paid tiers climb green to
             rose as cost rises, so relative spend is legible before any number is read.
           </p>
@@ -133,11 +133,11 @@ export default function SettingsPage() {
                   <span className="grid h-7 w-7 shrink-0 place-items-center rounded lane-soft lane-fg">
                     <lane.icon className="h-3.5 w-3.5" aria-hidden />
                   </span>
-                  <span className="w-20 shrink-0 text-sm font-medium text-text">{lane.label}</span>
-                  <code className="shrink-0 rounded bg-sunken px-1.5 py-0.5 font-mono text-2xs lane-fg">
+                  <span className="w-20 shrink-0 text-base font-medium text-text">{lane.label}</span>
+                  <code className="shrink-0 rounded bg-sunken px-1.5 py-0.5 font-mono text-xs lane-fg">
                     {lane.model}
                   </code>
-                  <span className="hidden min-w-0 flex-1 truncate text-xs text-text-3 sm:block">
+                  <span className="hidden min-w-0 flex-1 truncate text-sm text-text-3 sm:block">
                     {lane.blurb}
                   </span>
                 </li>
@@ -147,12 +147,12 @@ export default function SettingsPage() {
         </Panel>
       </section>
 
-      <div className="flex items-center gap-2.5 text-xs text-text-3">
+      <div className="flex items-center gap-2.5 text-sm text-text-3">
         <span className="h-5 w-5">
           <Mark />
         </span>
         Freeway console
-        <span className="fig">v2.0</span>
+        <span className="tnum">v2.0</span>
       </div>
     </div>
   );
@@ -172,8 +172,8 @@ function Row({
   return (
     <div className="flex items-center gap-3 px-4 py-3">
       <Icon className="h-3.5 w-3.5 shrink-0 text-text-3" aria-hidden />
-      <dt className="w-32 shrink-0 text-xs text-text-3">{label}</dt>
-      <dd className={cn("min-w-0 flex-1 truncate text-xs text-text", mono && "font-mono")}>
+      <dt className="w-32 shrink-0 text-sm text-text-3">{label}</dt>
+      <dd className={cn("min-w-0 flex-1 truncate text-sm text-text", mono && "font-mono")}>
         {value}
       </dd>
     </div>

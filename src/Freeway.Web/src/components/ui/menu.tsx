@@ -145,8 +145,8 @@ export function Menu({ trigger, children, align = "right", className }: MenuProp
               visibility: pos ? "visible" : "hidden",
             }}
             className={cn(
-              "fixed z-50 w-52 overflow-hidden rounded border border-hair-bright",
-              "bg-overlay py-1 shadow-overlay animate-pop",
+              "fixed z-50 w-56 overflow-hidden rounded-xl border border-hair-bright",
+              "bg-overlay p-1.5 shadow-overlay animate-pop",
               className
             )}
           >
@@ -174,13 +174,13 @@ export function MenuItem({
       role="menuitem"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors",
+        "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-base font-medium transition-colors",
         tone === "danger"
           ? "text-bad hover:bg-bad/10"
           : "text-text-2 hover:bg-raised hover:text-text"
       )}
     >
-      {Icon && <Icon className="h-3.5 w-3.5" aria-hidden />}
+      {Icon && <Icon className="h-4 w-4" aria-hidden />}
       {children}
     </button>
   );

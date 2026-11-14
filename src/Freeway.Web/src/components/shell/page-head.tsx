@@ -2,11 +2,8 @@ import { ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
 
 /**
- * The top of a page: a real display heading, then the page's own controls.
- *
- * The previous header set the page title at 18px, barely above body text, so nothing
- * anchored the eye on arrival. It gets a display size here and the controls sit on
- * the same line rather than in a separate bar.
+ * The top of a page: a real display heading, a sentence saying what the page is
+ * for, and the page's own controls on the same line.
  */
 export function PageHead({
   title,
@@ -14,18 +11,18 @@ export function PageHead({
   actions,
   className,
 }: {
-  title: string;
+  title: ReactNode;
   lede?: ReactNode;
   actions?: ReactNode;
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap items-end justify-between gap-x-6 gap-y-4", className)}>
-      <div className="min-w-0">
-        <h1 className="text-3xl font-semibold tracking-tight text-text">{title}</h1>
-        {lede && <p className="mt-1.5 max-w-xl text-sm text-text-2">{lede}</p>}
+    <div className={cn("reveal flex flex-wrap items-end justify-between gap-x-8 gap-y-5", className)}>
+      <div className="min-w-0 max-w-3xl">
+        <h1 className="text-3xl font-extrabold text-text sm:text-4xl">{title}</h1>
+        {lede && <p className="mt-2 text-lg text-text-2">{lede}</p>}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap items-center gap-3">{actions}</div>}
     </div>
   );
 }

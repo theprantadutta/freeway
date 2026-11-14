@@ -8,30 +8,31 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   busy?: boolean;
 }
 
+/** Presses in slightly when clicked, so a click is felt before its result arrives. */
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = "outline", size = "md", busy, disabled, children, ...props }, ref) => {
     const variants = {
-      solid: "bg-text text-inverse hover:opacity-90",
-      outline: "border border-hair-bright bg-raised text-text hover:border-text-3",
+      solid: "bg-text text-inverse hover:bg-text/90",
+      outline: "border border-hair-bright bg-raised text-text hover:border-text-3/70 hover:bg-raised/70",
       ghost: "text-text-2 hover:bg-raised hover:text-text",
       danger: "border border-bad/40 bg-bad/10 text-bad hover:bg-bad/20",
-      lane: "border lane-edge lane-soft lane-fg hover:brightness-125",
+      lane: "border lane-edge lane-soft text-text hover:brightness-125",
     };
 
     const sizes = {
-      sm: "h-7 px-2.5 text-xs gap-1.5",
-      md: "h-8 px-3 text-sm gap-1.5",
-      lg: "h-10 px-4 text-base gap-2",
-      icon: "h-8 w-8",
+      sm: "h-8 px-3 text-sm gap-1.5 rounded-lg",
+      md: "h-10 px-4 text-base gap-2 rounded-[0.625rem]",
+      lg: "h-12 px-5 text-lg gap-2 rounded-xl",
+      icon: "h-10 w-10 rounded-[0.625rem]",
     };
 
     return (
       <button
         ref={ref}
         className={cn(
-          "inline-flex items-center justify-center whitespace-nowrap rounded font-medium",
-          "transition-[background-color,border-color,opacity,filter] duration-150 ease-out",
-          "disabled:opacity-40 disabled:pointer-events-none",
+          "inline-flex items-center justify-center whitespace-nowrap font-semibold",
+          "transition-[background-color,border-color,opacity,filter,transform] duration-150 ease-out",
+          "active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40",
           variants[variant],
           sizes[size],
           className
@@ -39,7 +40,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={disabled || busy}
         {...props}
       >
-        {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+        {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
         {children}
       </button>
     );

@@ -46,15 +46,15 @@ function Item({ note, onClose }: { note: Note; onClose: () => void }) {
   const tones = {
     success: "text-ok",
     error: "text-bad",
-    info: "text-accent",
+    info: "text-text-2",
     warning: "text-warn",
   };
   const Icon = icons[note.tone];
 
   return (
-    <div className="pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded border border-hair-bright bg-raised px-3.5 py-3 animate-lift">
-      <Icon className={cn("mt-px h-4 w-4 shrink-0", tones[note.tone])} aria-hidden />
-      <p className="flex-1 text-sm text-text">{note.message}</p>
+    <div className="pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-xl border border-hair-bright bg-overlay px-4 py-3.5 shadow-overlay animate-lift">
+      <Icon className={cn("mt-0.5 h-5 w-5 shrink-0", tones[note.tone])} aria-hidden />
+      <p className="flex-1 text-base text-text">{note.message}</p>
       <button
         onClick={onClose}
         aria-label="Dismiss"
