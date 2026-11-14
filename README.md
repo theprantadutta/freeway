@@ -755,7 +755,7 @@ The Next.js web panel provides:
 
 ### Dashboard
 - Stats overview: Total projects, active projects, requests today, monthly cost
-- Selected models display (free, all three paid tiers, and image)
+- Routing table: for each paid lane, the order requests are tried in - the Claude credit model, the Claude Code bridge, then the OpenRouter model as the billed last resort - with whether each is available right now; free and image show their selected model
 - Quick navigation to all features
 
 ### Design system
