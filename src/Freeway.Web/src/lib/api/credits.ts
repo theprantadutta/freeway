@@ -22,6 +22,10 @@ export const creditsApi = {
       expires_at: expiresAt,
     }),
 
+  /** Whether the Claude Code bridge can serve right now. Cached on the server; makes no call. */
+  getLocalClaude: () =>
+    api.get<{ configured: boolean; can_serve: boolean; state: string; summary: string }>("/admin/local-claude"),
+
   sendTestReminder: () =>
     api.post<{ sent: boolean; recipient?: string | null; detail: string }>("/admin/credits/key/test-reminder"),
 };

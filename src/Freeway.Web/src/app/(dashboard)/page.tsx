@@ -14,6 +14,7 @@ import { SeriesChart } from "@/components/chart/series-chart";
 import { LaneSplit } from "@/components/chart/lane-split";
 import { analyticsApi } from "@/lib/api/analytics";
 import { modelsApi } from "@/lib/api/models";
+import { creditsApi } from "@/lib/api/credits";
 import { LANES, laneOf, laneLabel } from "@/lib/theme/lanes";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -412,48 +413,101 @@ function Delta({
   );
 }
 
-/** Which model each lane currently routes to. Reference, so it sits at the bottom. */
+/**
+ * Where each lane's requests actually go, in the order they are tried. A paid lane
+ * tries the Claude API credit, then the Claude Code bridge, and only then its
+ * OpenRouter model -- so listing the OpenRouter model alone, as this used to, showed
+ * the last resort as if it were the answer.
+ */
 function LaneRouting() {
   const free = useQuery({ queryKey: ["model", "free"], queryFn: () => modelsApi.getSelectedFreeModel() });
   const low = useQuery({ queryKey: ["model", "paid", "low"], queryFn: () => modelsApi.getSelectedPaidModelForTier("low") });
   const moderate = useQuery({ queryKey: ["model", "paid", "moderate"], queryFn: () => modelsApi.getSelectedPaidModelForTier("moderate") });
   const premium = useQuery({ queryKey: ["model", "paid", "premium"], queryFn: () => modelsApi.getSelectedPaidModelForTier("premium") });
   const image = useQuery({ queryKey: ["model", "image"], queryFn: () => modelsApi.getSelectedImageModel() });
+  const credit = useQuery({ queryKey: ["credits"], queryFn: creditsApi.getOverview });
+  const bridge = useQuery({ queryKey: ["local-claude"], queryFn: creditsApi.getLocalClaude });
 
   const rows = [
-    { lane: LANES.free, q: free },
-    { lane: LANES.low, q: low },
-    { lane: LANES.moderate, q: moderate },
-    { lane: LANES.premium, q: premium },
-    { lane: LANES.image, q: image },
-  ];
+    { lane: LANES.free, q: free, tier: null },
+    { lane: LANES.low, q: low, tier: "low" },
+    { lane: LANES.moderate, q: moderate, tier: "moderate" },
+    { lane: LANES.premium, q: premium, tier: "premium" },
+    { lane: LANES.image, q: image, tier: null },
+  ] as const;
+
+  const creditOn = credit.data?.configured ?? false;
+  const creditReady = credit.data?.can_serve ?? false;
+  const bridgeOn = bridge.data?.configured ?? false;
+  const bridgeReady = bridge.data?.can_serve ?? false;
 
   return (
     <Panel>
       <ul className="divide-y divide-hair">
-        {rows.map(({ lane, q }) => (
-          <li
-            key={lane.key}
-            className={cn(lane.scope, "flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3")}
-          >
-            <span className="flex w-28 shrink-0 items-center gap-2">
-              <span className="h-2 w-2 rounded-full lane-bg" aria-hidden />
-              <span className="text-sm font-medium text-text">{lane.label}</span>
-            </span>
-            <code className="shrink-0 rounded bg-sunken px-1.5 py-0.5 font-mono text-2xs lane-fg">
-              {lane.model}
-            </code>
-            <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-2">
-              {q.isLoading ? <Pulse className="h-3 w-48" /> : q.data?.model_id ?? "not selected"}
-            </span>
-            {q.data?.pricing && (
-              <span className="fig shrink-0 text-2xs text-text-3">
-                {money(parseFloat(q.data.pricing.prompt) * 1_000_000)} in ·{" "}
-                {money(parseFloat(q.data.pricing.completion) * 1_000_000)} out /M
+        {rows.map(({ lane, q, tier }) => {
+          const creditModel = tier ? credit.data?.lanes.find((l) => l.tier === tier)?.model : undefined;
+          const steps: { label: string; detail: string; ready: boolean; billed?: boolean }[] = [];
+          if (creditOn && creditModel) {
+            steps.push({ label: creditModel, detail: "Claude credit", ready: creditReady });
+          }
+          if (tier && bridgeOn) {
+            steps.push({
+              label: "Claude Code",
+              detail: tier === "premium" ? "bridge" : "bridge, spare capacity",
+              ready: bridgeReady,
+            });
+          }
+          const fallback = q.data?.model_id ?? "not selected";
+
+          return (
+            <li
+              key={lane.key}
+              className={cn(lane.scope, "flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3")}
+            >
+              <span className="flex w-28 shrink-0 items-center gap-2">
+                <span className="h-2 w-2 rounded-full lane-bg" aria-hidden />
+                <span className="text-sm font-medium text-text">{lane.label}</span>
               </span>
-            )}
-          </li>
-        ))}
+              <code className="shrink-0 rounded bg-sunken px-1.5 py-0.5 font-mono text-2xs lane-fg">
+                {lane.model}
+              </code>
+              <ol className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                {steps.map((s) => (
+                  <li key={s.label} className="flex items-center gap-2">
+                    <span className="flex items-center gap-1.5">
+                      <span
+                        className={cn("h-1.5 w-1.5 rounded-full", s.ready ? "bg-ok" : "bg-text-3")}
+                        title={s.ready ? "available now" : "not available right now; skipped"}
+                        aria-hidden
+                      />
+                      <span className="font-mono text-xs text-text">{s.label}</span>
+                      <span className="text-2xs text-text-3">{s.detail}</span>
+                    </span>
+                    <ArrowRight className="h-3 w-3 shrink-0 text-text-3" aria-hidden />
+                  </li>
+                ))}
+                <li className="flex min-w-0 items-center gap-1.5">
+                  {q.isLoading ? (
+                    <Pulse className="h-3 w-48" />
+                  ) : (
+                    <>
+                      <span className={cn("truncate font-mono text-xs", steps.length ? "text-text-3" : "text-text-2")}>
+                        {fallback}
+                      </span>
+                      {steps.length > 0 && <span className="text-2xs text-text-3">OpenRouter, last resort</span>}
+                    </>
+                  )}
+                </li>
+              </ol>
+              {q.data?.pricing && (
+                <span className="fig shrink-0 text-2xs text-text-3">
+                  {money(parseFloat(q.data.pricing.prompt) * 1_000_000)} in ·{" "}
+                  {money(parseFloat(q.data.pricing.completion) * 1_000_000)} out /M
+                </span>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </Panel>
   );
