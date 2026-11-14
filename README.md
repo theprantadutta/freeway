@@ -30,6 +30,7 @@ Freeway is a full-featured AI Gateway built with .NET 10 that:
 - **Spend Alerts**: Email when a project, model or the gateway overspends, or OpenRouter credit runs low
 - **Claude API credit** (optional): Spend the Claude plan's monthly API credit first on every paid lane (Opus 5.5 for premium, Sonnet 5.5 for moderate, Haiku 5.5 for low), counted to the cent and shown on its own dashboard page, then fall back to the Claude Code bridge and only then OpenRouter. Emails before the key expires
 - **Local Claude Code** (optional): Serve `paid:premium` from a host Claude Code subscription at no charge, with `paid:moderate` riding along on spare capacity, under a configurable hourly token budget. Falls back to a paid model whenever it is unavailable, or set `use_local_only` to fail instead
+- **No paid fallback** (per request): `"no_paid_fallback": true` serves a paid lane only from what is already paid for, the Claude credit and then the Claude Code bridge, and returns `503` instead of reaching a billed model. For free projects; callers that don't send it still fall back to OpenRouter
 - **PostgreSQL Storage**: Persistent storage for projects, users, and usage data
 - **Web Control Panel**: Next.js 16 dashboard with JWT authentication
 - **Docker Ready**: Includes Dockerfile and compose.yml with Traefik support
@@ -131,6 +132,7 @@ as server-sent events instead of one JSON body — see [Streaming](#streaming).
 |---|---|---|
 | `reasoning` | object | Reasoning effort for models that think before answering, passed straight through (e.g. `{"effort": "low"}`). Usually the largest cost lever available on such a model — see below. Models that don't reason ignore it. |
 | `use_local_only` | bool | Serve from the local Claude Code subscription or fail. Never falls back to a paid model, so the request cannot quietly cost money. `503` if the subscription is unavailable, throttled or out of hourly budget; `400` for image models, which it cannot generate. |
+| `no_paid_fallback` | bool | Serve a paid lane from the Claude API credit, then the local Claude Code subscription, or fail. Like `use_local_only` it never reaches a billed model, but it also uses the credit. `503` (with both reasons) when neither can answer; `400` for `image` or a specific model ID, which only a billed provider has. `free` is unaffected. Off unless sent, so other callers keep their OpenRouter fallback. |
 
 ```json
 {
@@ -924,6 +926,8 @@ MODEL VALUES (the gateway picks the actual model and falls back on failure)
 FREEWAY EXTRAS (optional)
 - "reasoning": {"effort": "low"}  cuts cost on reasoning models a lot
 - "use_local_only": true          serve from the local Claude subscription or fail (503), never pay
+- "no_paid_fallback": true        Claude credit, then the local Claude subscription, or fail (503);
+                                  never reaches a billed model. For apps that must never cost money
 
 ERRORS
 - JSON body {"detail": "...", "error": {"message": "...", "type": "...", "code": <status>}}
@@ -1057,7 +1061,8 @@ MY CREDENTIALS
 CHAT
 - POST /v1/chat/completions (alias /chat/completions), OpenAI request and response shape
 - model: "free" | "paid:low" | "paid:moderate" | "paid:premium" | "<provider model id>"
-- Extras: reasoning {"effort": "low"|"medium"|"high"}, use_local_only true|false
+- Extras: reasoning {"effort": "low"|"medium"|"high"}, use_local_only true|false,
+  no_paid_fallback true|false (paid lanes: Claude credit, then local Claude, else 503; never billed)
 - n must be 1; content parts must be text
 
 STREAMING
@@ -1098,7 +1103,8 @@ Max 20x). It expires at the end of each billing cycle, so Freeway spends it firs
 
 OpenRouter is only reached when both of the others could not answer. A request naming a
 specific model (`openai/gpt-5-mini`) still gets exactly that model, `free` and `image` are
-unchanged, and `use_local_only` still means the bridge and nothing else. The response
+unchanged, and `use_local_only` still means the bridge and nothing else. To use the credit
+and the bridge but never OpenRouter, send `"no_paid_fallback": true` (below). The response
 shape does not change; only `model` says which Claude model answered.
 
 **Counting the credit.** Anthropic offers no way for an individual account to read its
@@ -1189,6 +1195,33 @@ Streaming requests use it too. The bridge runs Claude Code with
 prompt, so the cached prefix and the cost per request are the same as for a single
 reply. Text is relayed as Claude Code writes it; for `paid:moderate` the spillover
 deadline covers the first token rather than the whole answer.
+
+### Never billed: `no_paid_fallback`
+
+A free project can ask for the paid lanes without risking a bill:
+
+```bash
+curl -X POST https://freeway.example.com/chat/completions   -H "Authorization: Bearer $FREEWAY_KEY"   -H "Content-Type: application/json"   -d '{"model":"paid:premium","messages":[{"role":"user","content":"Hi"}],"no_paid_fallback":true}'
+```
+
+The request tries the Claude API credit, then the Claude Code bridge (at premium priority
+whatever the lane, since nothing comes after it), and if neither answers it fails with
+`503` and both reasons, for example:
+
+```json
+{"detail": "no_paid_fallback: neither the Claude API credit nor local Claude could serve this request (Claude credit: Anthropic did not answer in time; local Claude: rate limited: ...).", "error": {"message": "...", "type": "...", "code": 503}}
+```
+
+It never reaches OpenRouter. `image` and specific model IDs return `400`, because only a
+billed provider has them; `free` behaves as usual. It is per request and off by default,
+so every caller that does not send it keeps its normal fallback to a paid model. Where
+both are sent, `use_local_only` wins: it is the stricter of the two.
+
+| | Claude credit | Claude Code bridge | OpenRouter (billed) |
+|---|---|---|---|
+| default | yes | yes | yes |
+| `no_paid_fallback` | yes | yes | no, `503` instead |
+| `use_local_only` | no | yes | no, `503` instead |
 
 ### Demanding it: `use_local_only`
 

@@ -44,6 +44,14 @@ public class ChatCompletionRequestDto
     public bool UseLocalOnly { get; set; }
 
     /// <summary>
+    /// Serve a paid lane from what is already paid for -- the Claude API credit, then
+    /// the local Claude Code subscription -- and fail rather than fall back to a model
+    /// that is billed. Wider than <see cref="UseLocalOnly"/>, which allows the
+    /// subscription alone. Sent as "no_paid_fallback".
+    /// </summary>
+    public bool NoPaidFallback { get; set; }
+
+    /// <summary>
     /// Reasoning effort, for models that do it. Sent as "reasoning", the same shape
     /// the upstream takes: {"effort": "low"}.
     ///

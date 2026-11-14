@@ -360,6 +360,8 @@ optimisation the request can carry on past:
 3. **OpenRouter**, the tier's fallback chain. The only step that is billed.
 
 A specific model id skips 1 (and low skips 2) and goes straight to that model.
+`no_paid_fallback` stops after step 2 with a `503` instead of reaching 3, and refuses
+`image` and specific model ids with a `400`; `use_local_only` runs step 2 alone.
 `AnthropicCreditJob` recounts the credit every five minutes and runs
 `AnthropicKeyWatch`, which emails before the key expires and when it is rejected.
 

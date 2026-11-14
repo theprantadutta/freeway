@@ -141,6 +141,26 @@ public sealed class ChatRouter
             return Finish(backends, free, new ChatRoute(null, "free", null, null, [], false), failureStatus: 502);
         }
 
+        // no_paid_fallback: serve a paid lane from what is already paid for -- the
+        // credit, then the subscription -- and fail rather than reach a billed model.
+        // Only the lane names can be served that way; anything else ("image", a
+        // specific model) exists only at a billed provider, so it is refused up front
+        // rather than attempted and failed. "free" never costs money and was handled
+        // above as usual.
+        var noPaid = request.NoPaidFallback;
+        if (noPaid && !PaidTierExtensions.TryParseModel(request.Model, out _))
+        {
+            return Refuse<T>(
+                $"no_paid_fallback works with the paid lanes (\"paid\", \"paid:low\", \"paid:moderate\", \"paid:premium\") " +
+                $"and \"free\". '{request.Model}' can only be served by a billed provider.", 400);
+        }
+
+        // With no_paid_fallback the last failure is kept, so the request is logged
+        // with what went wrong instead of vanishing from the project's history.
+        T? lastFailure = default;
+        ChatRoute? lastFailureRoute = null;
+        var reasons = new List<string>();
+
         // Resolve model for paid or specific model requests
         var resolved = ResolveModel(request.Model);
 
@@ -181,16 +201,31 @@ public sealed class ChatRouter
                         failureStatus: 502);
                 }
 
-                await DiscardAsync(served);
+                reasons.Add($"Claude credit: {outcome.ErrorMessage}");
+                if (noPaid)
+                {
+                    lastFailure = served;
+                    lastFailureRoute = new ChatRoute(null, modelType, modelTier, null, candidates, ServedLocally: false, ServedByCredit: true);
+                }
+                else
+                {
+                    await DiscardAsync(served);
+                }
+
                 _logger.LogInformation(
                     "{Tier} request did not use the Anthropic credit ({Reason}); trying the next backend",
                     resolved.Tier, outcome.ErrorMessage);
             }
             else
             {
+                reasons.Add($"Claude credit: {status.Describe()}");
                 _logger.LogDebug(
                     "{Tier} request skipped the Anthropic credit ({Status})", resolved.Tier, status.Describe());
             }
+        }
+        else if (noPaid)
+        {
+            reasons.Add("Claude credit: not configured for this lane");
         }
 
         // Two lanes can be served from the local Claude Code subscription at no
@@ -209,9 +244,14 @@ public sealed class ChatRouter
         // Low rides along on the same spare-capacity terms as moderate, but only when
         // asked for by lane name: OpenRouter is the last resort for every lane, and
         // a caller naming a specific cheap model still gets that model.
+        //
+        // With no_paid_fallback every lane runs at premium priority, as use_local_only
+        // does: there is nothing after the subscription, so refusing instantly the way
+        // spillover does would turn spare-capacity rules into needless failures.
         var localPriority = resolved.Tier switch
         {
-            PaidTier.Premium => (LocalClaudePriority?)LocalClaudePriority.Premium,
+            not null when noPaid => (LocalClaudePriority?)LocalClaudePriority.Premium,
+            PaidTier.Premium => LocalClaudePriority.Premium,
             PaidTier.Moderate => LocalClaudePriority.Spillover,
             PaidTier.Low when PaidTierExtensions.TryParseModel(request.Model, out _) => LocalClaudePriority.Spillover,
             _ => null
@@ -231,17 +271,51 @@ public sealed class ChatRouter
                         failureStatus: 502);
                 }
 
-                await DiscardAsync(local);
+                reasons.Add($"local Claude: {outcome.ErrorMessage}");
+                if (noPaid)
+                {
+                    if (lastFailure is not null) await DiscardAsync(lastFailure);
+                    lastFailure = local;
+                    lastFailureRoute = new ChatRoute(null, modelType, modelTier, null, candidates, ServedLocally: true);
+                }
+                else
+                {
+                    await DiscardAsync(local);
+                }
+
                 _logger.LogInformation(
                     "{Tier} request did not use local Claude ({Reason}); using a paid model instead",
                     resolved.Tier, outcome.ErrorMessage);
             }
             else
             {
+                reasons.Add($"local Claude: {health.Describe()}");
                 _logger.LogInformation(
                     "{Tier} request skipped local Claude ({Status}); using a paid model instead",
                     resolved.Tier, health.Describe());
             }
+        }
+        else if (noPaid)
+        {
+            reasons.Add("local Claude: not enabled on this gateway");
+        }
+
+        if (noPaid)
+        {
+            // The caller would rather have an error than a bill, so this is where the
+            // request stops. 503, like use_local_only: what is missing is capacity
+            // that may well be back shortly, not anything wrong with the request.
+            var error = "no_paid_fallback: neither the Claude API credit nor local Claude could serve this request (" +
+                        string.Join("; ", reasons) + ").";
+            _logger.LogWarning("{Tier} request refused instead of billed: {Reasons}", resolved.Tier, string.Join("; ", reasons));
+
+            return new ChatRouting<T>
+            {
+                Attempt = lastFailure,
+                Route = lastFailureRoute,
+                Error = error,
+                StatusCode = 503
+            };
         }
 
         if (candidates.Count == 0)

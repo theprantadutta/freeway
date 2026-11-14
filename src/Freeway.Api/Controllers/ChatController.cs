@@ -33,7 +33,8 @@ public class ChatController : BaseApiController
             Stream: request.Stream,
             UseLocalOnly: request.UseLocalOnly,
             Reasoning: request.Reasoning,
-            N: request.N
+            N: request.N,
+            NoPaidFallback: request.NoPaidFallback
         );
 
         if (!request.Stream)
