@@ -57,7 +57,7 @@ export function Segmented<T extends string>({
         <span
           aria-hidden
           className={cn(
-            "absolute bottom-1 top-1 rounded-lg bg-raised shadow-card ring-1 ring-hair-bright",
+            "absolute bottom-1 top-1 rounded-lg bg-raised shadow-card ring-1 ring-[rgb(var(--accent)/0.45)]",
             "transition-[left,width] duration-300 ease-out",
             active?.scope
           )}

@@ -45,7 +45,7 @@ function isActive(pathname: string, href: string) {
  */
 export function Sidebar() {
   return (
-    <aside className="sticky top-0 hidden h-screen w-[17rem] shrink-0 flex-col border-r border-hair bg-sunken/60 lg:flex">
+    <aside className="sticky top-0 hidden h-screen w-[17rem] shrink-0 flex-col border-r border-hair/70 bg-sunken/45 backdrop-blur-xl lg:flex">
       <SidebarBody />
     </aside>
   );
@@ -94,7 +94,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
         {marker && (
           <span
             aria-hidden
-            className="absolute left-0 right-0 rounded-xl bg-raised ring-1 ring-hair transition-[top,height] duration-300 ease-out"
+            className="nav-active absolute left-0 right-0 rounded-xl transition-[top,height] duration-300 ease-out"
             style={{ top: marker.top, height: marker.height }}
           >
             <span className="stripe absolute left-2 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full" />
@@ -158,7 +158,7 @@ function RouteStatus({ onNavigate }: { onNavigate?: () => void }) {
   ] as const;
 
   return (
-    <div className="mx-3 mt-8 rounded-2xl border border-hair bg-panel/70 p-4">
+    <div className="card mx-3 mt-8 rounded-2xl p-4">
       <p className="mb-3 text-sm font-bold text-text-2">Routes</p>
       <ul className="space-y-3">
         {rows.map((r) => (
@@ -228,7 +228,7 @@ function Account() {
 
   return (
     <div className="flex items-center gap-3 rounded-xl px-1">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-raised text-sm font-bold text-text ring-1 ring-hair-bright">
+      <span className="grad grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-bold text-white">
         {name.charAt(0).toUpperCase()}
       </span>
       <span className="min-w-0 flex-1">

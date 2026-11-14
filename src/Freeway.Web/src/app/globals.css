@@ -3,80 +3,101 @@
 @tailwind utilities;
 
 /*
-  Freeway — a highway at night.
+  Freeway — dusk on the highway.
 
   Requests are traffic: they arrive from apps, take a lane, and leave through
-  whichever route answered them. The console is drawn the way that road looks after
-  dark. A midnight-navy surface, ink for structure, and the five lanes lit in their
-  own colours. Overpass, the face derived from the US highway-sign alphabet, carries
+  whichever route answered them. The console is drawn the way that road looks at
+  dusk: a deep plum-indigo sky with the last magenta, cyan and amber light glowing
+  at its edges, glassy panels floating over it, and the five lanes lit in their own
+  colours. Overpass, the face derived from the US highway-sign alphabet, carries
   every word and number.
 
-  Hue means one thing only: which lane a request took. Free, then the paid tiers
-  low, moderate and premium, with image apart. The five lane colours are a validated
-  categorical set (colour-blind safe in this order, in both themes). Text never wears
-  a lane colour; a dot, stripe or bar beside it carries the identity.
+  Lane hues mean which lane a request took; they are a validated categorical set,
+  colour-blind safe in this order in both themes. The violet-to-pink-to-amber
+  accent is the console's own voice: primary actions, where you are, and the
+  figures a page leads with. Text never wears a lane colour.
 */
 
 :root {
   /* Dark is the default: this is a screen people leave open. */
-  --base: 11 19 36;
-  --panel: 16 26 48;
-  --raised: 23 35 62;
-  --sunken: 13 22 41;
-  --hair: 30 43 71;
-  --hair-bright: 45 61 96;
+  --base: 16 11 38;
+  --panel: 27 20 60;
+  --raised: 38 29 80;
+  --sunken: 21 15 48;
+  --hair: 55 44 104;
+  --hair-bright: 80 66 140;
 
-  --overlay: 27 40 70;
-  --overlay-shadow: 0 0 0 1px rgb(0 0 0 / 0.45), 0 18px 40px -10px rgb(0 0 0 / 0.75);
-  --card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.25);
+  --overlay: 42 32 88;
+  --overlay-shadow: 0 0 0 1px rgb(0 0 0 / 0.35), 0 24px 48px -12px rgb(6 2 24 / 0.8);
+  --card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 10px 30px -18px rgb(6 2 24 / 0.9);
 
-  --text: 234 240 250;
-  --text-2: 166 179 204;
-  --text-3: 112 126 155;
+  --text: 247 244 255;
+  --text-2: 198 188 238;
+  --text-3: 148 136 198;
 
-  /* The interface accent is ink, not a hue: every hue is already spoken for. */
-  --accent: 234 240 250;
+  /* Focus rings and selected states. */
+  --accent: 178 148 255;
 
-  --free: 25 158 112;
-  --low: 57 135 229;
-  --moderate: 201 133 0;
-  --premium: 213 81 129;
-  --image: 144 133 233;
+  /* The console's own gradient: violet, pink, amber. */
+  --grad-a: 139 92 246;
+  --grad-b: 236 72 153;
+  --grad-c: 245 158 11;
 
-  --ok: 12 163 12;
+  /* Dusk light at the edges of the page. */
+  --glow-1: 217 70 239;
+  --glow-2: 34 211 238;
+  --glow-3: 251 146 60;
+  --glow-strength: 1;
+
+  --free: 31 166 115;
+  --low: 59 143 240;
+  --moderate: 197 131 0;
+  --premium: 228 90 146;
+  --image: 145 128 242;
+
+  --ok: 34 197 94;
   --warn: 250 178 25;
-  --bad: 208 59 59;
+  --bad: 244 63 94;
 
   color-scheme: dark;
 }
 
 :root.light {
-  --base: 243 245 249;
+  --base: 250 247 255;
   --panel: 255 255 255;
   --raised: 255 255 255;
-  --sunken: 237 240 246;
-  --hair: 225 230 239;
-  --hair-bright: 203 211 225;
+  --sunken: 245 241 253;
+  --hair: 233 227 247;
+  --hair-bright: 214 205 238;
 
   --overlay: 255 255 255;
-  --overlay-shadow: 0 0 0 1px rgb(15 23 41 / 0.08), 0 16px 32px -10px rgb(15 23 41 / 0.28);
-  --card-shadow: 0 1px 2px rgb(15 23 41 / 0.05), 0 1px 0 rgb(15 23 41 / 0.03);
+  --overlay-shadow: 0 0 0 1px rgb(46 26 110 / 0.08), 0 20px 40px -14px rgb(46 26 110 / 0.3);
+  --card-shadow: 0 1px 2px rgb(46 26 110 / 0.05), 0 14px 32px -20px rgb(46 26 110 / 0.35);
 
-  --text: 15 23 41;
-  --text-2: 74 86 114;
-  --text-3: 115 127 152;
+  --text: 30 20 66;
+  --text-2: 86 74 128;
+  --text-3: 132 120 170;
 
-  --accent: 15 23 41;
+  --accent: 124 58 237;
 
-  --free: 27 175 122;
-  --low: 42 120 214;
-  --moderate: 237 161 0;
-  --premium: 232 123 164;
-  --image: 98 80 214;
+  --grad-a: 124 58 237;
+  --grad-b: 219 39 119;
+  --grad-c: 234 138 0;
 
-  --ok: 12 140 12;
-  --warn: 214 145 0;
-  --bad: 208 59 59;
+  --glow-1: 232 121 249;
+  --glow-2: 103 232 249;
+  --glow-3: 253 186 116;
+  --glow-strength: 0.75;
+
+  --free: 20 168 115;
+  --low: 47 127 224;
+  --moderate: 224 154 0;
+  --premium: 224 98 143;
+  --image: 122 98 232;
+
+  --ok: 22 163 74;
+  --warn: 217 119 6;
+  --bad: 225 29 72;
 
   color-scheme: light;
 }
@@ -91,7 +112,14 @@
   }
 
   body {
-    background: rgb(var(--base));
+    background-color: rgb(var(--base));
+    /* Dusk: magenta light low on the left, cyan on the right, amber below. Fixed,
+       so panels slide over the sky as the page scrolls. */
+    background-image:
+      radial-gradient(70rem 42rem at -10% -15%, rgb(var(--glow-1) / calc(0.26 * var(--glow-strength))), transparent 62%),
+      radial-gradient(60rem 40rem at 110% -5%, rgb(var(--glow-2) / calc(0.18 * var(--glow-strength))), transparent 60%),
+      radial-gradient(70rem 40rem at 60% 115%, rgb(var(--glow-3) / calc(0.16 * var(--glow-strength))), transparent 62%);
+    background-attachment: fixed;
     color: rgb(var(--text));
     font-family: var(--font-sans), system-ui, sans-serif;
     font-synthesis-weight: none;
@@ -105,7 +133,7 @@
   }
 
   ::selection {
-    background: rgb(var(--low) / 0.35);
+    background: rgb(var(--grad-b) / 0.35);
   }
 }
 
@@ -140,10 +168,75 @@
     inside them, so the hierarchy is visible in the corners too.
   */
   .card {
-    background: rgb(var(--panel));
-    border: 1px solid rgb(var(--hair));
+    background-color: rgb(var(--panel) / 0.74);
+    background-image: linear-gradient(180deg, rgb(255 255 255 / 0.035), transparent 40%);
+    border: 1px solid rgb(var(--hair) / 0.85);
     border-radius: 1rem;
     box-shadow: var(--card-shadow);
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+  }
+
+  /* The console's gradient, as a fill and as type. */
+  .grad {
+    background-image: linear-gradient(120deg, rgb(var(--grad-a)), rgb(var(--grad-b)) 55%, rgb(var(--grad-c)));
+  }
+  .grad-soft {
+    background-image: linear-gradient(120deg, rgb(var(--grad-a) / 0.3), rgb(var(--grad-b) / 0.18) 55%, rgb(var(--grad-c) / 0.12));
+  }
+  .text-grad {
+    background-image: linear-gradient(110deg, rgb(var(--grad-a)) 0%, rgb(var(--grad-b)) 50%, rgb(var(--grad-c)) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  :root.light .text-grad {
+    background-image: linear-gradient(110deg, rgb(var(--grad-a)) 0%, rgb(var(--grad-b)) 60%, rgb(var(--grad-c)) 100%);
+  }
+
+  /*
+    Tints give each figure on a page its own colour of light: a glow in the card's
+    corner and the colour of its trend line. Set one on a card with `glow`.
+  */
+  .tint-violet { --tint: 167 139 250; }
+  .tint-pink { --tint: 244 114 182; }
+  .tint-sky { --tint: 56 189 248; }
+  .tint-mint { --tint: 52 211 153; }
+  .tint-amber { --tint: 251 191 36; }
+  .tint-coral { --tint: 251 113 133; }
+  :root.light .tint-violet { --tint: 124 58 237; }
+  :root.light .tint-pink { --tint: 219 39 119; }
+  :root.light .tint-sky { --tint: 2 132 199; }
+  :root.light .tint-mint { --tint: 5 150 105; }
+  :root.light .tint-amber { --tint: 217 119 6; }
+  :root.light .tint-coral { --tint: 225 29 72; }
+
+  .glow {
+    background-image:
+      radial-gradient(22rem 14rem at 100% 0%, rgb(var(--tint) / 0.24), transparent 70%),
+      linear-gradient(180deg, rgb(255 255 255 / 0.035), transparent 40%);
+    border-color: rgb(var(--tint) / 0.28);
+  }
+  :root.light .glow {
+    background-image: radial-gradient(22rem 14rem at 100% 0%, rgb(var(--tint) / 0.14), transparent 70%);
+  }
+  .spark {
+    color: rgb(var(--tint, var(--text-3)));
+  }
+  .tint-fg {
+    color: rgb(var(--tint));
+  }
+  .tint-bg {
+    background-color: rgb(var(--tint));
+  }
+
+  /* Where you are: the active navigation item. */
+  .nav-active {
+    background-image: linear-gradient(100deg, rgb(var(--grad-a) / 0.34), rgb(var(--grad-b) / 0.16) 70%, transparent);
+    box-shadow: inset 0 0 0 1px rgb(var(--grad-a) / 0.35);
+  }
+  :root.light .nav-active {
+    background-image: linear-gradient(100deg, rgb(var(--grad-a) / 0.14), rgb(var(--grad-b) / 0.07) 70%, transparent);
   }
 
   /*
@@ -281,7 +374,7 @@
 }
 @keyframes arrive {
   0% {
-    background-color: rgb(var(--low) / 0.18);
+    background-color: rgb(var(--grad-b) / 0.16);
     transform: translateY(-6px);
     opacity: 0;
   }

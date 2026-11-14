@@ -12,7 +12,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = "outline", size = "md", busy, disabled, children, ...props }, ref) => {
     const variants = {
-      solid: "bg-text text-inverse hover:bg-text/90",
+      solid: "grad text-white shadow-[0_8px_24px_-10px_rgb(var(--grad-b)/0.7)] hover:brightness-110",
       outline: "border border-hair-bright bg-raised text-text hover:border-text-3/70 hover:bg-raised/70",
       ghost: "text-text-2 hover:bg-raised hover:text-text",
       danger: "border border-bad/40 bg-bad/10 text-bad hover:bg-bad/20",

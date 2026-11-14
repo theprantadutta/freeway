@@ -764,8 +764,9 @@ The Next.js web panel provides:
 
 ### Design system
 
-The console is drawn like a highway at night: a midnight-navy surface, ink for
-structure, and the five lanes lit in their own colours. Text is set in Overpass, a
+The console is drawn like a highway at dusk: a deep plum-indigo sky with magenta,
+cyan and amber light at its edges, glassy panels, a violet-to-pink-to-amber accent,
+and the five lanes lit in their own colours. Text is set in Overpass, a
 descendant of the US highway-sign alphabet. Hue means one thing only, which lane a
 request took: free, low, moderate, premium and image, a categorical set validated for
 colour-blind safety in both themes. Text never wears a lane colour; a dot, stripe or

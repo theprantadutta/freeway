@@ -66,8 +66,8 @@ export function CreditBurn({ c, height = 280 }: { c: CreditOverview; height?: nu
             </g>
           )}
 
-          <path d={area} fill="rgb(var(--text) / 0.08)" className="animate-fade" />
-          <path d={line} fill="none" stroke="rgb(var(--text))" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" pathLength={1} className="draw" style={{ ["--len" as string]: 1 }} />
+          <path d={area} fill="rgb(var(--accent) / 0.16)" className="animate-fade" />
+          <path d={line} fill="none" stroke="rgb(var(--accent))" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" pathLength={1} className="draw" style={{ ["--len" as string]: 1 }} />
 
           {/* The forecast: from today to the reset at the cycle's pace so far. */}
           <line
@@ -80,7 +80,7 @@ export function CreditBurn({ c, height = 280 }: { c: CreditOverview; height?: nu
             strokeDasharray="5 6"
             className="animate-fade"
           />
-          <circle cx={lastX} cy={lastY} r={5} fill="rgb(var(--text))" stroke="rgb(var(--panel))" strokeWidth={2} />
+          <circle cx={lastX} cy={lastY} r={5} fill="rgb(var(--accent))" stroke="rgb(var(--panel))" strokeWidth={2} />
           <text x={x(totalDays)} y={y(projectedEnd) - 10} textAnchor="end" className="fill-text-2 text-xs font-semibold">
             {cents(projectedEnd)} by the reset
           </text>

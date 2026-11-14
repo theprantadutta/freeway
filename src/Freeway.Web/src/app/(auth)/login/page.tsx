@@ -30,28 +30,29 @@ export default function LoginPage() {
       setAuth(r.token, r.user, r.expires_at);
       router.push("/");
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "That email and password did not match."
-      );
+      setError(err instanceof Error ? err.message : "That email and password did not match.");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
-      <div className="flex items-center justify-center px-6 py-14 sm:px-12">
-        <div className="w-full max-w-sm">
-          <span className="block h-9 w-9">
-            <Mark />
-          </span>
+    <div className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+      <div className="relative flex items-center justify-center px-6 py-14 sm:px-12">
+        <div className="reveal w-full max-w-md">
+          <div className="flex items-center gap-3">
+            <span className="block h-11 w-11">
+              <Mark />
+            </span>
+            <span className="text-2xl font-extrabold tracking-tight text-text">Freeway</span>
+          </div>
 
-          <h1 className="mt-8 text-4xl font-semibold tracking-tight text-text">Freeway</h1>
-          <p className="mt-2 text-base text-text-2">
-            Telemetry and routing for your gateway.
-          </p>
+          <h1 className="mt-12 text-4xl font-extrabold leading-tight">
+            <span className="text-grad">Welcome back.</span>
+          </h1>
+          <p className="mt-3 text-lg text-text-2">Sign in to see where your requests went and what they cost.</p>
 
-          <form onSubmit={submit} className="mt-9 space-y-4" noValidate>
+          <form onSubmit={submit} className="card mt-10 space-y-5 p-7" noValidate>
             <Field
               label="Email"
               type="email"
@@ -72,25 +73,22 @@ export default function LoginPage() {
                 placeholder="••••••••"
                 autoComplete="current-password"
                 required
-                className="pr-10"
+                className="pr-12"
               />
               <button
                 type="button"
                 onClick={() => setReveal(!reveal)}
                 aria-label={reveal ? "Hide password" : "Show password"}
-                className="absolute right-1.5 top-[26px] grid h-8 w-8 place-items-center rounded text-text-3 transition-colors hover:text-text"
+                className="absolute right-1.5 top-[30px] grid h-9 w-9 place-items-center rounded-lg text-text-3 transition-colors hover:text-text"
               >
-                {reveal ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
+                {reveal ? <EyeOff className="h-5 w-5" aria-hidden /> : <Eye className="h-5 w-5" aria-hidden />}
               </button>
             </div>
 
             {error && (
-              <div
-                role="alert"
-                className="flex items-start gap-2.5 rounded border border-bad/30 bg-bad/[0.07] px-3.5 py-2.5"
-              >
-                <CircleAlert className="mt-px h-4 w-4 shrink-0 text-bad" aria-hidden />
-                <p className="text-base text-bad">{error}</p>
+              <div role="alert" className="flex items-start gap-3 rounded-xl border border-bad/35 bg-bad/[0.08] px-4 py-3 animate-lift">
+                <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-bad" aria-hidden />
+                <p className="text-base text-text">{error}</p>
               </div>
             )}
 
@@ -98,53 +96,102 @@ export default function LoginPage() {
               Sign in
             </Button>
           </form>
+
+          <p className="mt-6 text-sm text-text-3">Only the gateway&apos;s administrators can sign in here.</p>
         </div>
       </div>
 
-      {/* The routing table itself, told with the product's own vocabulary. */}
-      <aside className="relative hidden items-center overflow-hidden border-l border-hair bg-panel px-12 lg:flex">
-        <div className="ticks absolute inset-x-0 top-0 h-px opacity-50" aria-hidden />
-        <div className="w-full max-w-md">
-          <p className="text-base font-semibold text-text-3">The routing table</p>
-          <h2 className="mt-3 text-2xl font-semibold tracking-tight text-text">
-            Ask for a lane, not a model
-          </h2>
-          <p className="mt-2 text-base leading-relaxed text-text-2">
-            Freeway picks the provider, steps around whichever one is throttling, and records what
-            every request actually cost.
-          </p>
-
-          <ul className="enter mt-8 space-y-px overflow-hidden rounded-panel border border-hair">
-            {LANE_ORDER.map((key, i) => {
-              const lane = LANES[key];
-              return (
-                <li
-                  key={key}
-                  className={cn(
-                    lane.scope,
-                    "flex items-center gap-3 bg-raised px-4 py-3",
-                    i > 0 && "border-t border-hair"
-                  )}
-                >
-                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded lane-soft lane-fg">
-                    <lane.icon className="h-3.5 w-3.5" aria-hidden />
-                  </span>
-                  <code className="font-mono text-base text-text">{lane.model}</code>
-                  <span
-                    className="ml-auto h-1 rounded-full lane-bg"
-                    style={{ width: `${96 - i * 16}px` }}
-                    aria-hidden
-                  />
-                </li>
-              );
-            })}
-          </ul>
-
-          <p className="mt-5 text-sm text-text-3">
-            Lane colour tracks cost, from free through to premium.
-          </p>
+      <aside className="relative hidden overflow-hidden border-l border-hair/60 lg:block">
+        <Highway />
+        <div className="relative z-10 flex h-full flex-col justify-end p-14">
+          <div className="reveal max-w-lg" style={{ ["--d" as string]: "200ms" }}>
+            <h2 className="text-4xl font-extrabold leading-tight text-white">Every request takes the cheapest road that works.</h2>
+            <p className="mt-4 text-lg text-white/75">
+              Apps ask for a lane. Freeway sends each request down whatever is already paid for first, and pays only
+              when nothing else can answer.
+            </p>
+            <ul className="mt-8 flex flex-wrap gap-2.5">
+              {LANE_ORDER.map((key) => {
+                const lane = LANES[key];
+                return (
+                  <li
+                    key={key}
+                    className={cn(
+                      lane.scope,
+                      "flex items-center gap-2 rounded-full bg-white/10 px-3.5 py-1.5 text-sm font-semibold text-white ring-1 ring-white/15 backdrop-blur"
+                    )}
+                  >
+                    <span className="h-2.5 w-2.5 rounded-full lane-bg" aria-hidden />
+                    {lane.label}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </div>
       </aside>
+    </div>
+  );
+}
+
+/**
+ * Five lanes running toward a dusk horizon, their markings moving toward the
+ * viewer. The one piece of pure atmosphere in the console, on the one page where
+ * there is nothing to read yet; stilled for reduced motion.
+ */
+function Highway() {
+  const lanes = LANE_ORDER.map((k) => LANES[k]);
+  const W = 1000;
+  const H = 1000;
+  const horizon = 380;
+  const vanishX = W / 2;
+  const spread = 1500;
+
+  return (
+    <div className="absolute inset-0" aria-hidden>
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(60% 40% at 50% 36%, rgb(251 146 60 / 0.75), transparent 70%), radial-gradient(80% 50% at 20% 20%, rgb(217 70 239 / 0.55), transparent 70%), radial-gradient(70% 50% at 85% 25%, rgb(34 211 238 / 0.35), transparent 70%), linear-gradient(180deg, #1b0b3d 0%, #2a0f4f 38%, #120826 39%, #0b0620 100%)",
+        }}
+      />
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full">
+        <defs>
+          <linearGradient id="road" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#1c0f3f" stopOpacity="0.4" />
+            <stop offset="100%" stopColor="#07041a" stopOpacity="0.95" />
+          </linearGradient>
+          <style>{`@keyframes dash-in{to{stroke-dashoffset:-140}}`}</style>
+        </defs>
+        <polygon
+          points={`${vanishX - 6},${horizon} ${vanishX + 6},${horizon} ${vanishX + spread / 2},${H} ${vanishX - spread / 2},${H}`}
+          fill="url(#road)"
+        />
+        {lanes.map((lane, i) => {
+          const t = (i + 0.5) / lanes.length - 0.5;
+          const x1 = vanishX + t * 10;
+          const x2 = vanishX + t * spread * 0.92;
+          return (
+            <g key={lane.key} className={lane.scope}>
+              <line x1={x1} y1={horizon} x2={x2} y2={H} stroke="rgb(var(--lane))" strokeOpacity={0.3} strokeWidth={12} />
+              <line
+                x1={x1}
+                y1={horizon}
+                x2={x2}
+                y2={H}
+                stroke="rgb(var(--lane))"
+                strokeWidth={6}
+                strokeLinecap="round"
+                strokeDasharray="40 100"
+                style={{ animation: `dash-in ${2.4 + i * 0.25}s linear infinite` }}
+              />
+            </g>
+          );
+        })}
+        <line x1={0} y1={horizon} x2={W} y2={horizon} stroke="rgb(255 210 160)" strokeOpacity={0.5} strokeWidth={1.5} />
+      </svg>
+      <div className="absolute inset-0 bg-gradient-to-t from-[#0b0620] via-[#0b0620]/40 to-transparent" />
     </div>
   );
 }

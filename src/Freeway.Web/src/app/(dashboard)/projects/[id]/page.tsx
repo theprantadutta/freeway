@@ -123,19 +123,19 @@ export default function ProjectDetailPage() {
       ) : (
         <div className={cn("space-y-10 transition-opacity duration-300", overview.isFetching && overview.isPlaceholderData && "opacity-60")}>
           <section className="reveal grid gap-4 sm:grid-cols-2 xl:grid-cols-5" style={{ ["--d" as string]: "80ms" }}>
-            <Tile label="Requests" value={w ? <AnimatedNumber value={w.requests} format={(v) => count(Math.round(v))} /> : null}
+            <Tile tint="tint-sky" label="Requests" value={w ? <AnimatedNumber value={w.requests} format={(v) => count(Math.round(v))} /> : null}
               foot={w && prev ? <Delta current={w.requests} previous={prev.requests} /> : null}
               trend={series.map((s) => s.requests)}
               note={w ? `${pct(w.requests ? ((w.requests - w.failures) / w.requests) * 100 : 100, 1)} succeeded` : ""} />
-            <Tile label="Billed" value={w ? <AnimatedNumber value={Number(w.cost)} format={cents} /> : null}
+            <Tile tint="tint-coral" label="Billed" value={w ? <AnimatedNumber value={Number(w.cost)} format={cents} /> : null}
               foot={w && prev ? <Delta current={Number(w.cost)} previous={Number(prev.cost)} upIsGood={false} /> : null}
               trend={series.map((s) => Number(s.cost))} note="Charged by OpenRouter" />
-            <Tile label="Credit used" value={w ? <AnimatedNumber value={Number(w.credit_usd)} format={cents} /> : null}
+            <Tile tint="tint-pink" label="Credit used" value={w ? <AnimatedNumber value={Number(w.credit_usd)} format={cents} /> : null}
               trend={series.map((s) => Number(s.credit_usd ?? 0))} note="Taken off the Claude credit" />
-            <Tile label="Answered free" value={w ? <AnimatedNumber value={w.requests ? (w.unbilled / w.requests) * 100 : 0} format={(v) => `${v.toFixed(0)}%`} /> : null}
+            <Tile tint="tint-mint" label="Answered free" value={w ? <AnimatedNumber value={w.requests ? (w.unbilled / w.requests) * 100 : 0} format={(v) => `${v.toFixed(0)}%`} /> : null}
               foot={w ? <Meter value={w.requests ? (w.unbilled / w.requests) * 100 : 0} warnAt={101} badAt={101} label="Share answered without a bill" className="mt-2" /> : null}
               note={w ? `${count(w.unbilled)} without a bill` : ""} />
-            <Tile label="Response time" value={w ? <AnimatedNumber value={w.p50_response_ms} format={(v) => ms(v)} /> : null}
+            <Tile tint="tint-violet" label="Response time" value={w ? <AnimatedNumber value={w.p50_response_ms} format={(v) => ms(v)} /> : null}
               note={w ? `Median. 95% within ${ms(w.p95_response_ms)}` : ""} />
           </section>
 
@@ -209,12 +209,14 @@ export default function ProjectDetailPage() {
 }
 
 function Tile({
+  tint,
   label,
   value,
   foot,
   trend,
   note,
 }: {
+  tint: string;
   label: string;
   value: React.ReactNode;
   foot?: React.ReactNode;
@@ -222,7 +224,7 @@ function Tile({
   note?: string;
 }) {
   return (
-    <Panel className="flex min-h-[11rem] flex-col p-5">
+    <Panel className={cn(tint, "glow flex min-h-[11rem] flex-col p-5")}>
       <p className="text-base font-semibold text-text-2">{label}</p>
       <p className="mt-2 text-3xl font-extrabold text-text">{value ?? <Pulse className="h-9 w-24" />}</p>
       {foot}

@@ -110,7 +110,7 @@ function Headline({ o, loading, days }: { o?: Overview; loading: boolean; days: 
     <header className="reveal max-w-5xl">
       <p className="text-base font-semibold text-text-3">Overview, last {days} days</p>
       <h1 className="mt-3 text-3xl font-extrabold leading-tight text-text sm:text-4xl xl:text-[3.25rem] xl:leading-[1.08]">
-        {count(w.requests)} requests, {freeShare}% answered without a bill.{" "}
+        <span className="text-grad">{count(w.requests)} requests, {freeShare}% answered without a bill.</span>{" "}
         <span className="text-text-2">
           You paid {cents(Number(w.cost))}
           {Number(w.avoided_usd) > 0 && <> and saved about {cents(Number(w.avoided_usd))}</>}.
@@ -129,6 +129,7 @@ function Kpis({ o }: { o?: Overview }) {
 
   const cells = [
     {
+      tint: "tint-coral",
       label: "Billed",
       value: w ? <AnimatedNumber value={Number(w.cost)} format={cents} /> : null,
       foot: w && p ? <Delta current={Number(w.cost)} previous={Number(p.cost)} upIsGood={false} /> : null,
@@ -136,6 +137,7 @@ function Kpis({ o }: { o?: Overview }) {
       note: "Charged by OpenRouter. Everything else was free.",
     },
     {
+      tint: "tint-sky",
       label: "Requests",
       value: w ? <AnimatedNumber value={w.requests} format={(v) => count(Math.round(v))} /> : null,
       foot: w && p ? <Delta current={w.requests} previous={p.requests} /> : null,
@@ -143,18 +145,21 @@ function Kpis({ o }: { o?: Overview }) {
       note: w ? `${pct(w.requests ? ((w.requests - w.failures) / w.requests) * 100 : 100, 1)} succeeded` : "",
     },
     {
+      tint: "tint-mint",
       label: "Answered free",
       value: w ? <AnimatedNumber value={w.requests ? (w.unbilled / w.requests) * 100 : 0} format={(v) => `${v.toFixed(0)}%`} /> : null,
       foot: w ? <Meter value={w.requests ? (w.unbilled / w.requests) * 100 : 0} warnAt={101} badAt={101} label="Share answered without a bill" className="mt-2" /> : null,
       note: w ? `${count(w.unbilled)} by the credit, Claude Code or free providers` : "",
     },
     {
+      tint: "tint-amber",
       label: "Saved",
       value: w ? <AnimatedNumber value={Number(w.avoided_usd)} format={cents} /> : null,
       trend: series.map((s) => Number(s.avoided_usd ?? 0)),
       note: "What paid models would have charged for the free answers",
     },
     {
+      tint: "tint-violet",
       label: "Response time",
       value: w ? <AnimatedNumber value={w.p50_response_ms} format={(v) => ms(v)} /> : null,
       note: w ? `Median. 95% finish within ${ms(w.p95_response_ms)}` : "",
@@ -163,7 +168,7 @@ function Kpis({ o }: { o?: Overview }) {
 
   return (
     <section className="reveal grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6" style={{ ["--d" as string]: "140ms" }} aria-label="Key figures">
-      <Panel className="flex flex-col justify-between p-5 sm:col-span-2 lg:col-span-1 lg:row-span-2 2xl:row-span-1">
+      <Panel className="tint-pink glow flex flex-col justify-between p-5 sm:col-span-2 lg:col-span-1 lg:row-span-2 2xl:row-span-1">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-base font-semibold text-text-2">Claude credit</p>
@@ -192,7 +197,7 @@ function Kpis({ o }: { o?: Overview }) {
       </Panel>
 
       {cells.map((cell) => (
-        <Panel key={cell.label} className="flex min-h-[11rem] flex-col p-5">
+        <Panel key={cell.label} className={cn(cell.tint, "glow flex min-h-[11rem] flex-col p-5")}>
           <p className="text-base font-semibold text-text-2">{cell.label}</p>
           <p className="mt-2 text-3xl font-extrabold text-text">{cell.value ?? <Pulse className="h-9 w-24" />}</p>
           {cell.foot}

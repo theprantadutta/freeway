@@ -166,7 +166,8 @@ export function LaneChart({ series, height = 300 }: { series: UsagePoint[]; heig
                       <path
                         key={p.date}
                         d={columnPath(x, y(v), barW, h)}
-                        className={cn("grow-y fill-text-2 transition-opacity duration-200", dim && "opacity-40")}
+                        className={cn("grow-y transition-opacity duration-200", dim && "opacity-40")}
+                        fill="rgb(var(--accent))"
                         style={delay}
                       />
                     );

@@ -61,7 +61,7 @@ export function Sparkline({
     <svg
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
-      className={cn("w-full overflow-visible", emphasis ? "text-text" : "text-text-3", className)}
+      className={cn("w-full overflow-visible", emphasis ? "text-accent" : "spark", className)}
       style={{ height }}
       aria-hidden
     >
@@ -118,7 +118,7 @@ export function Ring({
 
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
-  const tone = value >= badAt ? "text-bad" : value >= warnAt ? "text-warn" : "text-text";
+  const tone = value >= badAt ? "text-bad" : value >= warnAt ? "text-warn" : "text-accent";
 
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }} role="img" aria-label={label}>
@@ -165,7 +165,7 @@ export function Meter({
     const t = requestAnimationFrame(() => setShown(Math.max(0, Math.min(100, value))));
     return () => cancelAnimationFrame(t);
   }, [value]);
-  const tone = value >= badAt ? "bg-bad" : value >= warnAt ? "bg-warn" : "bg-text";
+  const tone = value >= badAt ? "bg-bad" : value >= warnAt ? "bg-warn" : "grad";
 
   return (
     <div
