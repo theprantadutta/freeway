@@ -190,7 +190,16 @@ public sealed class ChatRouter
             backends.Credit is { } credit && _credit.Serves(creditTier))
         {
             var status = _credit.Status;
-            if (status.CanServe)
+
+            // A project past its own share of the credit (ANTHROPIC_CREDIT_PROJECT_CAPS)
+            // skips it, and carries on exactly as if the credit were spent.
+            var capped = status.CanServe ? await _credit.ProjectCapReachedAsync(request.ProjectId) : null;
+            if (capped is not null)
+            {
+                reasons.Add($"Claude credit: {capped}");
+                _logger.LogInformation("{Tier} request skipped the Anthropic credit ({Reason})", resolved.Tier, capped);
+            }
+            else if (status.CanServe)
             {
                 var served = await credit(creditTier);
                 var outcome = backends.Outcome(served);

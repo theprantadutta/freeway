@@ -600,6 +600,7 @@ Environment variables (see `.env.example`):
 | `ANTHROPIC_CREDIT_MONTHLY_USD` | No | The monthly grant (default: 100) |
 | `ANTHROPIC_CREDIT_RENEWAL_DAY` | No | Day of the month the grant renews, the day of the Console's "Expires on" (default: 1) |
 | `ANTHROPIC_CREDIT_STOP_AT` | No | Stop using the credit at this share of the grant (default: 0.97) |
+| `ANTHROPIC_CREDIT_PROJECT_CAPS` | No | Per-project credit share per cycle in USD, by name or id, e.g. `quotely:50,atlas:10`. Past it, that project skips the credit (default: none) |
 | `ANTHROPIC_CREDIT_TIERS` | No | Lanes that use the credit (default: `premium,moderate,low`) |
 | `ANTHROPIC_PREMIUM_MODEL` / `_MODERATE_MODEL` / `_LOW_MODEL` | No | Model per lane (default: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`) |
 | `ANTHROPIC_PREMIUM_EFFORT` / `_MODERATE_EFFORT` / `_LOW_EFFORT` | No | Effort when the caller sends none (default: model default, `low`, `low`) |
@@ -934,6 +935,11 @@ FREEWAY EXTRAS (optional)
 - "no_paid_fallback": true        Claude credit, then the local Claude subscription, or fail (503);
                                   never reaches a billed model. For apps that must never cost money
 
+CREDIT BUDGET
+- GET [YOUR_FREEWAY_URL]/v1/budget with the same project key: cycle dates, credit left,
+  this project's credit spend (cycle and today), its cap, and spendable_usd (what it can
+  spend before the reset without starving other projects)
+
 ERRORS
 - JSON body {"detail": "...", "error": {"message": "...", "type": "...", "code": <status>}}
 - 400 bad request, 401 bad key, 502 every upstream failed, 503 lane unavailable
@@ -1200,6 +1206,56 @@ Streaming requests use it too. The bridge runs Claude Code with
 prompt, so the cached prefix and the cost per request are the same as for a single
 reply. Text is relayed as Claude Code writes it; for `paid:moderate` the spillover
 deadline covers the first token rather than the whole answer.
+
+### Credit budget for a project: `GET /v1/budget`
+
+A project can ask how much of the monthly Claude credit it may still spend, with its
+own key (the same `X-Api-Key` or `Authorization: Bearer` it uses for chat). Also
+served at `/budget`. Admin keys and logins get `401`: the answer is per project.
+
+```json
+{
+  "cycle": { "starts_at": "2026-11-09T00:00:00Z", "resets_at": "2026-12-09T00:00:00Z", "days_left": 21.65 },
+  "credit": {
+    "state": "active",
+    "grant_usd": 100.0,
+    "used_usd": 5.405,
+    "usable_usd": 97.0,
+    "remaining_usable_usd": 91.595,
+    "burn_per_day_usd": 0.6476,
+    "projected_unused_usd": 80.5722
+  },
+  "project": {
+    "id": "6a99c868-42f0-4bdc-87fd-7a0d8639302c",
+    "name": "Quotely",
+    "credit_used_usd": 1.2034,
+    "credit_used_today_usd": 0.0412,
+    "requests": 131,
+    "share_of_credit": 0.2226,
+    "cap_usd": 50.0
+  },
+  "spendable_usd": 72.31
+}
+```
+
+- `usable_usd` is the grant times `ANTHROPIC_CREDIT_STOP_AT`: Freeway stops using the
+  credit there. `remaining_usable_usd` is what is left of it.
+- `spendable_usd` = max(0, min(remaining_usable − reserve, cap − credit_used)), where
+  the reserve is the other projects' spend per day so far × days left × 1.5, so one
+  project spending its surplus cannot starve the rest before the reset. It is 0 when
+  the credit is off, spent, or has no grant this cycle.
+- `credit_used_today_usd` counts from 00:00 UTC, for a job that paces itself
+  (for example, spendable ÷ days left per day).
+- Figures are Freeway's own count at list price; the provider does not expose the
+  balance to an individual account.
+
+**Per-project caps.** `ANTHROPIC_CREDIT_PROJECT_CAPS=quotely:50` gives a project a share
+of the credit per cycle, by project name (case-insensitive) or id; several are
+comma-separated. Once a project's credit spend this cycle reaches its cap, its paid
+requests skip the credit and carry on to the Claude Code bridge, then OpenRouter, or
+fail with `503` under `no_paid_fallback`. The cap is checked before each request, so
+the last request before it can take the spend slightly past it. Projects without a
+cap are unaffected.
 
 ### Never billed: `no_paid_fallback`
 

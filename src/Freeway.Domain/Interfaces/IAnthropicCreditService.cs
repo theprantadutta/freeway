@@ -58,6 +58,71 @@ public interface IAnthropicCreditService
     /// clears a block left by an earlier rejection if it now does, then refreshes.
     /// </summary>
     Task<AnthropicCreditStatus> CheckAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Why a project may not use the credit right now because it has reached its own
+    /// cap (ANTHROPIC_CREDIT_PROJECT_CAPS), or null when it may. Projects without a cap
+    /// always get null, without touching the database.
+    /// </summary>
+    Task<string?> ProjectCapReachedAsync(Guid projectId, CancellationToken cancellationToken = default);
+
+    /// <summary>The credit as one project sees it: what is left, what it has used, and what it may still spend.</summary>
+    Task<CreditBudget> GetBudgetAsync(Guid projectId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Returned by GET /v1/budget. Serialised in snake_case.</summary>
+public class CreditBudget
+{
+    public CreditBudgetCycle Cycle { get; set; } = new();
+    public CreditBudgetCredit Credit { get; set; } = new();
+    public CreditBudgetProject Project { get; set; } = new();
+
+    /// <summary>
+    /// What this project can spend before the reset without leaving the others short:
+    /// max(0, min(remaining_usable − reserve, cap − project's credit used)), where the
+    /// reserve is the other projects' daily pace × days left × 1.5.
+    /// </summary>
+    public decimal SpendableUsd { get; set; }
+}
+
+public class CreditBudgetCycle
+{
+    public DateTime? StartsAt { get; set; }
+    public DateTime? ResetsAt { get; set; }
+    public double DaysLeft { get; set; }
+}
+
+public class CreditBudgetCredit
+{
+    /// <summary>off / unchecked / active / no_grant / exhausted / blocked.</summary>
+    public string State { get; set; } = "off";
+    public decimal GrantUsd { get; set; }
+    public decimal UsedUsd { get; set; }
+
+    /// <summary>What Freeway will spend before it stops using the credit (grant × stop-at share).</summary>
+    public decimal UsableUsd { get; set; }
+    public decimal RemainingUsableUsd { get; set; }
+    public decimal BurnPerDayUsd { get; set; }
+    public decimal ProjectedUnusedUsd { get; set; }
+}
+
+public class CreditBudgetProject
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public decimal CreditUsedUsd { get; set; }
+
+    /// <summary>Credit used since 00:00 UTC today.</summary>
+    public decimal CreditUsedTodayUsd { get; set; }
+
+    /// <summary>Requests this cycle served from the credit.</summary>
+    public int Requests { get; set; }
+
+    /// <summary>This project's share of the credit used this cycle, 0 to 1.</summary>
+    public decimal ShareOfCredit { get; set; }
+
+    /// <summary>The project's own cap, or null when it has none.</summary>
+    public decimal? CapUsd { get; set; }
 }
 
 public enum AnthropicCreditState

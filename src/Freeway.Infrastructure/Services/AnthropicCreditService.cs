@@ -732,6 +732,112 @@ public class AnthropicCreditService : IAnthropicCreditService
 
     #endregion
 
+    #region Project caps and budgets
+
+    public async Task<string?> ProjectCapReachedAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        if (Config.ProjectCaps.Count == 0)
+        {
+            return null;
+        }
+
+        var name = await ProjectNameAsync(projectId, cancellationToken);
+        if (CreditBudgetMath.CapFor(Config.ProjectCaps, projectId, name) is not { } cap)
+        {
+            return null;
+        }
+
+        var grant = Status.Grant;
+        if (grant is null)
+        {
+            return null;
+        }
+
+        var used = await ProjectCreditAsync(projectId, grant.StartsAt, grant.ExpiresAt, cancellationToken);
+        return used >= cap
+            ? $"{name ?? "this project"} has used its {cap:0.####} USD share of the credit this cycle"
+            : null;
+    }
+
+    public async Task<CreditBudget> GetBudgetAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var status = IsConfigured ? await RefreshAsync(cancellationToken) : Status;
+        var now = _clock.UtcNow;
+        var name = await ProjectNameAsync(projectId, cancellationToken) ?? string.Empty;
+        var cap = CreditBudgetMath.CapFor(Config.ProjectCaps, projectId, name);
+
+        var budget = new CreditBudget
+        {
+            Credit = new CreditBudgetCredit
+            {
+                State = status.State == AnthropicCreditState.NoGrant ? "no_grant" : status.State.ToString().ToLowerInvariant()
+            },
+            Project = new CreditBudgetProject { Id = projectId, Name = name, CapUsd = cap }
+        };
+
+        var grant = status.Grant;
+        if (grant is null)
+        {
+            return budget;
+        }
+
+        var totalDays = (grant.ExpiresAt - grant.StartsAt).TotalDays;
+        var elapsed = Math.Clamp((now - grant.StartsAt).TotalDays, 0, totalDays);
+        var daysLeft = Math.Max(0, totalDays - elapsed);
+
+        var used = status.UsedUsd;
+        var usable = status.UsableUsd;
+        var remainingUsable = Math.Max(0, usable - used);
+        var burn = used / (decimal)Math.Max(elapsed, 0.25);
+        var projected = Math.Min(grant.AmountUsd, used + burn * (decimal)daysLeft);
+
+        var rows = await _db.UsageLogs
+            .Where(l => l.ProjectId == projectId && l.Provider == ProviderName && l.CreditCostUsd != null &&
+                        l.CreatedAt >= grant.StartsAt && l.CreatedAt < grant.ExpiresAt)
+            .Select(l => new { l.CreatedAt, Cost = l.CreditCostUsd ?? 0m })
+            .ToListAsync(cancellationToken);
+
+        var projectUsed = rows.Sum(r => r.Cost);
+        var today = now.Date;
+
+        budget.Cycle = new CreditBudgetCycle
+        {
+            StartsAt = grant.StartsAt,
+            ResetsAt = grant.ExpiresAt,
+            DaysLeft = Math.Round(daysLeft, 2)
+        };
+        budget.Credit.GrantUsd = grant.AmountUsd;
+        budget.Credit.UsedUsd = Math.Round(used, 4);
+        budget.Credit.UsableUsd = Math.Round(usable, 4);
+        budget.Credit.RemainingUsableUsd = Math.Round(remainingUsable, 4);
+        budget.Credit.BurnPerDayUsd = Math.Round(burn, 4);
+        budget.Credit.ProjectedUnusedUsd = Math.Round(Math.Max(0, grant.AmountUsd - projected), 4);
+
+        budget.Project.CreditUsedUsd = Math.Round(projectUsed, 6);
+        budget.Project.CreditUsedTodayUsd = Math.Round(rows.Where(r => r.CreatedAt >= today).Sum(r => r.Cost), 6);
+        budget.Project.Requests = rows.Count;
+        budget.Project.ShareOfCredit = used > 0 ? Math.Round(projectUsed / used, 4) : 0;
+
+        // Nothing is spendable while the credit cannot be used at all; a temporary
+        // pause (rate limit, outage) still reports the figure, since it will lift.
+        budget.SpendableUsd = status.State is AnthropicCreditState.Off or AnthropicCreditState.NoGrant or AnthropicCreditState.Exhausted
+            ? 0
+            : CreditBudgetMath.Spendable(remainingUsable, Math.Max(0, used - projectUsed), elapsed, daysLeft, cap, projectUsed);
+
+        return budget;
+    }
+
+    private Task<string?> ProjectNameAsync(Guid projectId, CancellationToken cancellationToken) =>
+        _db.Projects.Where(p => p.Id == projectId).Select(p => p.Name).FirstOrDefaultAsync(cancellationToken);
+
+    private Task<decimal> ProjectCreditAsync(Guid projectId, DateTime from, DateTime to, CancellationToken cancellationToken) =>
+        _db.UsageLogs
+            .Where(l => l.ProjectId == projectId && l.Provider == ProviderName && l.CreditCostUsd != null &&
+                        l.CreatedAt >= from && l.CreatedAt < to)
+            .SumAsync(l => l.CreditCostUsd ?? 0m, cancellationToken);
+
+    #endregion
+
     #region Settings
 
     /// <summary>Read once per process; changing any of it means a restart, as with every other setting.</summary>
@@ -759,6 +865,9 @@ public class AnthropicCreditService : IAnthropicCreditService
         public int OutagePauseMinutes { get; init; }
         public string LowModel { get; init; } = "claude-haiku-5-5";
         public string? LowEffort { get; init; }
+
+        /// <summary>Per-project credit caps in USD, by project name or id.</summary>
+        public Dictionary<string, decimal> ProjectCaps { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
         public static Settings FromEnvironment()
         {
@@ -810,7 +919,8 @@ public class AnthropicCreditService : IAnthropicCreditService
                 OutageFailures = Math.Max(1, Int("ANTHROPIC_OUTAGE_FAILURES", 3)),
                 OutagePauseMinutes = Math.Max(1, Int("ANTHROPIC_OUTAGE_PAUSE_MINUTES", 5)),
                 LowModel = Env("ANTHROPIC_LOW_MODEL") ?? "claude-haiku-5-5",
-                LowEffort = Env("ANTHROPIC_LOW_EFFORT") ?? "low"
+                LowEffort = Env("ANTHROPIC_LOW_EFFORT") ?? "low",
+                ProjectCaps = CreditBudgetMath.ParseCaps(Env("ANTHROPIC_CREDIT_PROJECT_CAPS"))
             };
         }
     }

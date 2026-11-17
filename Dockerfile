@@ -14,6 +14,7 @@ COPY ["src/Freeway.Domain/Freeway.Domain.csproj", "src/Freeway.Domain/"]
 COPY ["src/Freeway.Application/Freeway.Application.csproj", "src/Freeway.Application/"]
 COPY ["src/Freeway.Infrastructure/Freeway.Infrastructure.csproj", "src/Freeway.Infrastructure/"]
 COPY ["src/Freeway.Api/Freeway.Api.csproj", "src/Freeway.Api/"]
+COPY ["tests/Freeway.Tests/Freeway.Tests.csproj", "tests/Freeway.Tests/"]
 
 # Restore dependencies
 RUN dotnet restore "freeway.sln"
