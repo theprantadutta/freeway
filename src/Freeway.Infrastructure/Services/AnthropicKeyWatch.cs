@@ -75,7 +75,18 @@ public class AnthropicKeyWatch
                 ExpirySource = "estimated"
             };
             _db.ProviderKeys.Add(key);
-            await _db.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })
+            {
+                // Another check (the startup run and the scheduled run can coincide right
+                // after a deploy) recorded this key first. Use its record.
+                _db.ProviderKeys.Remove(key); // an unsaved add: this just stops tracking it
+                return await _db.ProviderKeys.FirstAsync(
+                    k => k.Provider == Provider && k.Fingerprint == fingerprint, cancellationToken);
+            }
 
             _logger.LogInformation(
                 "New Anthropic key {Hint} first seen; expected to expire {Expiry:u}",
